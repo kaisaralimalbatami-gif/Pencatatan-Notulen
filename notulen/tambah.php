@@ -1,5 +1,6 @@
 <?php
 session_start();
+// Pastikan path database benar
 require_once __DIR__ . '/../app/config/database.php';
 
 // Proteksi Halaman
@@ -29,12 +30,15 @@ if(isset($_POST['simpan'])){
 
     // --- MULAI KODE CCTV (LOG AKTIVITAS) ---
     if ($simpan) {
-        // Panggil Helper Log
-        require_once __DIR__ . '/../helpers/log.php';
-        
-        // Catat ke database aktivitas
-        $log_pesan = "Menambahkan notulen baru: " . $judul;
-        catat_log($conn, $log_pesan);
+        // PERBAIKAN PATH HELPER LOG DI SINI (ADA TAMBAHAN /app/)
+        // Pastikan file C:\xampp\htdocs\Pencatatan-Notulen\app\helpers\log.php BENAR-BENAR ADA
+        if (file_exists(__DIR__ . '/../app/helpers/log.php')) {
+            require_once __DIR__ . '/../app/helpers/log.php'; 
+            
+            // Catat ke database aktivitas
+            $log_pesan = "Menambahkan notulen baru: " . $judul;
+            catat_log($conn, $log_pesan);
+        }
     }
     // --- SELESAI KODE CCTV ---
 
@@ -233,7 +237,7 @@ if(isset($_POST['simpan'])){
                         </button>
                         <button type="button" class="btn-cancel" id="previewBtn" style="background: #e0f2fe; color: #0369a1; border-color: #bae6fd;">
                             <i class="bi bi-eye-fill me-2"></i> PREVIEW
-                        </div>
+                        </button>
                         <a href="index.php" class="btn-cancel">
                             <i class="bi bi-x-circle me-2"></i> BATAL
                         </a>

@@ -1,4 +1,7 @@
 <?php
+// 1. SOLUSI PERTAMA: BUFFERING
+ob_start(); 
+
 session_start();
 require_once __DIR__ . '/../app/config/database.php';
 
@@ -8,10 +11,9 @@ if (!isset($_SESSION['login'])) {
     exit;
 }
 
-require_once __DIR__ . '/../include/navbar.php';
-
 $error = '';
 
+// 2. SOLUSI KEDUA: LOGIKA DI ATAS, NAVBAR DI BAWAH
 if(isset($_POST['simpan'])){
     $judul = mysqli_real_escape_string($conn, trim($_POST['judul'] ?? ''));
     $tanggal = mysqli_real_escape_string($conn, $_POST['tanggal'] ?? '');
@@ -26,6 +28,16 @@ if(isset($_POST['simpan'])){
                 VALUES ('$judul', '$tanggal', '$waktu', '$tempat', '$peserta', 'Terjadwal')";
         
         if(mysqli_query($conn, $sql)) {
+            
+            // --- MULAI KODE CCTV (LOG AKTIVITAS) ---
+            // Kita catat pembuatan rapat baru
+            if (file_exists(__DIR__ . '/../app/helpers/log.php')) {
+                require_once __DIR__ . '/../app/helpers/log.php'; 
+                $log_pesan = "Menjadwalkan rapat baru: " . $judul;
+                catat_log($conn, $log_pesan);
+            }
+            // --- SELESAI KODE CCTV ---
+
             $_SESSION['success_message'] = "Rapat '$judul' berhasil dijadwalkan!";
             header("Location: index.php");
             exit();
@@ -34,6 +46,9 @@ if(isset($_POST['simpan'])){
         }
     }
 }
+
+// 3. BARU PANGGIL NAVBAR DISINI (AMAN)
+require_once __DIR__ . '/../include/navbar.php';
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -277,4 +292,8 @@ if(isset($_POST['simpan'])){
     });
     </script>
 </body>
-</html> 
+</html>
+<?php 
+// 4. TUTUP BUFFERING
+ob_end_flush(); 
+?>
