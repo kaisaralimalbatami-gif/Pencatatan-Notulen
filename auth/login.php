@@ -1,37 +1,68 @@
 <?php
 session_start();
 require_once "../app/config/database.php";
+// Pastikan path helper log benar, kita load di awal biar rapi
+require_once '../app/helpers/log.php'; 
 
 $error = null;
 
+/**
+ * Fungsi Modular: Mencari user berdasarkan email
+ * Memenuhi poin no. 1 (Logika fungsi) dan no. 3 (Clean Code - Prepared Statement)
+ */
+function cariUserBerdasarkanEmail($conn, $email) {
+    try {
+        // Memenuhi poin no. 2 (Try Catch pada kueri DB)
+        // Menggunakan Prepared Statement agar lebih aman dan clean
+        $stmt = $conn->prepare("SELECT * FROM users WHERE email = ?");
+        $stmt->bind_param("s", $email);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        // Kembalikan data user sebagai assoc array, atau null jika tidak ada
+        return $result->fetch_assoc();
+
+    } catch (Exception $e) {
+        // Catat error ke log server, jangan tampilkan detail teknis ke user
+        error_log("Error Login Query: " . $e->getMessage());
+        return null;
+    }
+}
+
+// Proses Login Utama
 if (isset($_POST['login'])) {
-    $email    = mysqli_real_escape_string($conn, $_POST['email']);
+    // Panggil fungsi koneksi baru kita
+    $conn = getDBConnection();
+
+    $email    = $_POST['email'];
     $password = $_POST['password'];
 
-    $q = mysqli_query($conn, "SELECT * FROM users WHERE email='$email'");
+    // Panggil fungsi pencarian user
+    $user = cariUserBerdasarkanEmail($conn, $email);
 
-    if (mysqli_num_rows($q) === 1) {
-        $user = mysqli_fetch_assoc($q);
-
+    if ($user) {
+        // Verifikasi Password
         if (password_verify($password, $user['password'])) {
-
-            // 1. SET SESSION DULU
+            
+            // 1. SET SESSION
             $_SESSION['login'] = true;
             $_SESSION['id']    = $user['id'];
             $_SESSION['nama']  = $user['nama'] ?? $user['email'];
             $_SESSION['email'] = $user['email'];
             $_SESSION['role']  = $user['role'];
 
-            // 2. CATAT LOG AKTIVITAS (CCTV)
-            require_once '../app/helpers/log.php';
-            catat_log($conn, "Login berhasil ke sistem");
-
-            // 3. REDIRECT
-            if ($user['role'] === 'admin') {
-                header("Location: ../dashboard/admin.php");
-            } else {
-                header("Location: ../dashboard/user.php");
+            // 2. CATAT LOG (Menggunakan try-catch juga biar aman)
+            try {
+                if (function_exists('catat_log')) {
+                    catat_log($conn, "Login berhasil ke sistem");
+                }
+            } catch (Exception $logError) {
+                error_log("Gagal catat log: " . $logError->getMessage());
             }
+
+            // 3. REDIRECT CLEAN CODE
+            $redirectUrl = ($user['role'] === 'admin') ? "../dashboard/admin.php" : "../dashboard/user.php";
+            header("Location: " . $redirectUrl);
             exit;
 
         } else {

@@ -1,53 +1,84 @@
 <?php
-// 1. SOLUSI PERTAMA: BUFFERING
-ob_start(); 
+// AWALI DENGAN OUTPUT BUFFERING
+ob_start();
 
 session_start();
 require_once __DIR__ . '/../app/config/database.php';
 
-// Cek login
+// 1. PROTEKSI HALAMAN
 if (!isset($_SESSION['login'])) {
     header("Location: ../auth/login.php");
     exit;
 }
 
-$error = '';
+// 2. KONEKSI DATABASE
+$conn = getDBConnection();
 
-// 2. SOLUSI KEDUA: LOGIKA DI ATAS, NAVBAR DI BAWAH
+/**
+ * Fungsi Modular: Tambah Rapat Baru
+ */
+function tambahRapat($conn, $data) {
+    try {
+        $sql = "INSERT INTO rapat (judul, tanggal, waktu, tempat, peserta, status) 
+                VALUES (?, ?, ?, ?, ?, 'Terjadwal')";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("sssss", 
+            $data['judul'], 
+            $data['tanggal'], 
+            $data['waktu'], 
+            $data['tempat'], 
+            $data['peserta']
+        );
+
+        if ($stmt->execute()) {
+            // --- LOG AKTIVITAS ---
+            $logPath = __DIR__ . '/../app/helpers/log.php';
+            if (file_exists($logPath)) {
+                require_once $logPath;
+                if (function_exists('catat_log')) {
+                    catat_log($conn, "Menjadwalkan rapat baru: " . $data['judul']);
+                }
+            }
+            return true;
+        }
+        return false;
+    } catch (Exception $e) {
+        error_log("Error Tambah Rapat: " . $e->getMessage());
+        return false;
+    }
+}
+
+// 3. PROSES SIMPAN
+$error = '';
 if(isset($_POST['simpan'])){
-    $judul = mysqli_real_escape_string($conn, trim($_POST['judul'] ?? ''));
-    $tanggal = mysqli_real_escape_string($conn, $_POST['tanggal'] ?? '');
-    $waktu = mysqli_real_escape_string($conn, $_POST['waktu'] ?? '');
-    $tempat = mysqli_real_escape_string($conn, trim($_POST['tempat'] ?? ''));
-    $peserta = mysqli_real_escape_string($conn, trim($_POST['peserta'] ?? ''));
+    $judul   = trim($_POST['judul'] ?? '');
+    $tanggal = $_POST['tanggal'] ?? '';
+    $waktu   = $_POST['waktu'] ?? '';
+    $tempat  = trim($_POST['tempat'] ?? '');
+    $peserta = trim($_POST['peserta'] ?? '');
     
     if(empty($judul) || empty($tanggal) || empty($waktu)) {
         $error = "Judul, tanggal, dan waktu wajib diisi!";
     } else {
-        $sql = "INSERT INTO rapat (judul, tanggal, waktu, tempat, peserta, status) 
-                VALUES ('$judul', '$tanggal', '$waktu', '$tempat', '$peserta', 'Terjadwal')";
-        
-        if(mysqli_query($conn, $sql)) {
-            
-            // --- MULAI KODE CCTV (LOG AKTIVITAS) ---
-            // Kita catat pembuatan rapat baru
-            if (file_exists(__DIR__ . '/../app/helpers/log.php')) {
-                require_once __DIR__ . '/../app/helpers/log.php'; 
-                $log_pesan = "Menjadwalkan rapat baru: " . $judul;
-                catat_log($conn, $log_pesan);
-            }
-            // --- SELESAI KODE CCTV ---
+        $dataInput = [
+            'judul'   => $judul,
+            'tanggal' => $tanggal,
+            'waktu'   => $waktu,
+            'tempat'  => $tempat,
+            'peserta' => $peserta
+        ];
 
+        if(tambahRapat($conn, $dataInput)) {
             $_SESSION['success_message'] = "Rapat '$judul' berhasil dijadwalkan!";
             header("Location: index.php");
             exit();
         } else {
-            $error = "Gagal menyimpan: " . mysqli_error($conn);
+            $error = "Gagal menyimpan data rapat.";
         }
     }
 }
 
-// 3. BARU PANGGIL NAVBAR DISINI (AMAN)
 require_once __DIR__ . '/../include/navbar.php';
 ?>
 <!DOCTYPE html>
@@ -80,7 +111,6 @@ require_once __DIR__ . '/../include/navbar.php';
             100% { background-position: 0% 50%; }
         }
 
-        /* Bubbles effect dari Login */
         .bg-bubbles {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             z-index: 0; overflow: hidden; pointer-events: none;
@@ -103,7 +133,6 @@ require_once __DIR__ . '/../include/navbar.php';
             padding: 40px 20px;
         }
 
-        /* Card Styling - Solid Putih mirip Dashboard */
         .form-card {
             background: #ffffff;
             border-radius: 25px;
@@ -113,7 +142,7 @@ require_once __DIR__ . '/../include/navbar.php';
         }
 
         .form-header {
-            background: #1e293b; /* Header Navy Gelap seperti tabel */
+            background: #1e293b;
             padding: 25px;
             color: white;
             text-align: center;
@@ -124,7 +153,6 @@ require_once __DIR__ . '/../include/navbar.php';
 
         .form-body { padding: 40px; }
 
-        /* Input Styling */
         .form-label {
             font-weight: 700;
             color: #1e293b;
@@ -145,6 +173,7 @@ require_once __DIR__ . '/../include/navbar.php';
             font-size: 1rem;
             transition: all 0.3s ease;
             background: #f8fafc;
+            width: 100%;
         }
 
         .form-control-custom:focus {
@@ -154,7 +183,6 @@ require_once __DIR__ . '/../include/navbar.php';
             outline: none;
         }
 
-        /* Button Styling - Pill Action */
         .btn-pill {
             padding: 12px 30px;
             border-radius: 50px;
@@ -221,7 +249,7 @@ require_once __DIR__ . '/../include/navbar.php';
                 <form method="post" id="rapatForm">
                     <div class="mb-4">
                         <label class="form-label"><i class="bi bi-pencil-square"></i> Judul Agenda</label>
-                        <input type="text" name="judul" class="form-control-custom w-100" 
+                        <input type="text" name="judul" class="form-control-custom" 
                                placeholder="Masukkan judul rapat..." required
                                value="<?= isset($_POST['judul']) ? htmlspecialchars($_POST['judul']) : '' ?>">
                     </div>
@@ -229,26 +257,26 @@ require_once __DIR__ . '/../include/navbar.php';
                     <div class="row">
                         <div class="col-md-6 mb-4">
                             <label class="form-label"><i class="bi bi-calendar3"></i> Tanggal</label>
-                            <input type="date" name="tanggal" id="tanggalInput" class="form-control-custom w-100" required
+                            <input type="date" name="tanggal" id="tanggalInput" class="form-control-custom" required
                                    value="<?= isset($_POST['tanggal']) ? htmlspecialchars($_POST['tanggal']) : '' ?>">
                         </div>
                         <div class="col-md-6 mb-4">
                             <label class="form-label"><i class="bi bi-clock"></i> Waktu</label>
-                            <input type="time" name="waktu" id="waktuInput" class="form-control-custom w-100" required
+                            <input type="time" name="waktu" id="waktuInput" class="form-control-custom" required
                                    value="<?= isset($_POST['waktu']) ? htmlspecialchars($_POST['waktu']) : '' ?>">
                         </div>
                     </div>
 
                     <div class="mb-4">
                         <label class="form-label"><i class="bi bi-geo-alt-fill"></i> Lokasi / Link Meeting</label>
-                        <input type="text" name="tempat" class="form-control-custom w-100" 
+                        <input type="text" name="tempat" class="form-control-custom" 
                                placeholder="Gedung A, Ruang 302, atau Zoom Link"
                                value="<?= isset($_POST['tempat']) ? htmlspecialchars($_POST['tempat']) : '' ?>">
                     </div>
 
                     <div class="mb-4">
                         <label class="form-label"><i class="bi bi-people-fill"></i> Peserta / Catatan Awal</label>
-                        <textarea name="peserta" class="form-control-custom w-100" rows="4" 
+                        <textarea name="peserta" class="form-control-custom" rows="4" 
                                   placeholder="Daftar peserta atau agenda ringkas..."><?= isset($_POST['peserta']) ? htmlspecialchars($_POST['peserta']) : '' ?></textarea>
                     </div>
 
@@ -295,5 +323,5 @@ require_once __DIR__ . '/../include/navbar.php';
 </html>
 <?php 
 // 4. TUTUP BUFFERING
-ob_end_flush(); 
+ob_end_flush();
 ?>

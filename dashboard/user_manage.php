@@ -11,19 +11,52 @@ if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'admin') {
     exit;
 }
 
-/* ================== AMBIL DATA STATISTIK ================== */
-$query_total = mysqli_query($conn, "SELECT COUNT(*) as total FROM users");
-$total_user = mysqli_fetch_assoc($query_total)['total'];
+// 1. PANGGIL KONEKSI (SOLUSI ERROR)
+$conn = getDBConnection();
 
-$query_admin = mysqli_query($conn, "SELECT COUNT(*) as total FROM users WHERE role = 'admin'");
-$total_admin = mysqli_fetch_assoc($query_admin)['total'];
+/**
+ * Fungsi Modular: Ambil Statistik User
+ */
+function ambilStatistikUser($conn) {
+    $stats = ['total' => 0, 'admin' => 0, 'biasa' => 0];
+    
+    try {
+        // Total User
+        $q1 = mysqli_query($conn, "SELECT COUNT(*) as total FROM users");
+        if($q1) $stats['total'] = mysqli_fetch_assoc($q1)['total'];
 
-$total_biasa = $total_user - $total_admin;
+        // Total Admin
+        $q2 = mysqli_query($conn, "SELECT COUNT(*) as total FROM users WHERE role = 'admin'");
+        if($q2) $stats['admin'] = mysqli_fetch_assoc($q2)['total'];
 
-// AMBIL SEMUA DATA USER
-$q = mysqli_query($conn, "SELECT id, email, role FROM users ORDER BY role ASC, email ASC");
+        // Hitung user biasa
+        $stats['biasa'] = $stats['total'] - $stats['admin'];
 
-// INCLUDE NAVBAR (PASTIKAN PATH BENAR)
+    } catch (Exception $e) {
+        error_log("Error Stat User: " . $e->getMessage());
+    }
+    
+    return $stats;
+}
+
+/**
+ * Fungsi Modular: Ambil Semua Data User
+ */
+function ambilDaftarUser($conn) {
+    try {
+        $q = mysqli_query($conn, "SELECT id, email, role FROM users ORDER BY role ASC, email ASC");
+        return mysqli_fetch_all($q, MYSQLI_ASSOC);
+    } catch (Exception $e) {
+        error_log("Error Daftar User: " . $e->getMessage());
+        return [];
+    }
+}
+
+// 2. EKSEKUSI LOGIKA
+$statistik = ambilStatistikUser($conn);
+$daftarUser = ambilDaftarUser($conn);
+
+// INCLUDE NAVBAR
 require_once __DIR__ . '/../include/navbar.php';
 ob_end_flush();
 ?>
@@ -212,7 +245,7 @@ ob_end_flush();
             <div class="stat-badge">
                 <div class="icon-circle" style="background: #6366f1;"><i class="bi bi-people-fill"></i></div>
                 <div>
-                    <div class="fw-bold text-dark h4 mb-0"><?= $total_user ?></div>
+                    <div class="fw-bold text-dark h4 mb-0"><?= $statistik['total'] ?></div>
                     <small class="text-muted fw-bold text-uppercase" style="font-size: 0.7rem;">Total User</small>
                 </div>
             </div>
@@ -221,7 +254,7 @@ ob_end_flush();
             <div class="stat-badge">
                 <div class="icon-circle" style="background: #f59e0b;"><i class="bi bi-shield-lock-fill"></i></div>
                 <div>
-                    <div class="fw-bold text-dark h4 mb-0"><?= $total_admin ?></div>
+                    <div class="fw-bold text-dark h4 mb-0"><?= $statistik['admin'] ?></div>
                     <small class="text-muted fw-bold text-uppercase" style="font-size: 0.7rem;">Admin</small>
                 </div>
             </div>
@@ -230,7 +263,7 @@ ob_end_flush();
             <div class="stat-badge">
                 <div class="icon-circle" style="background: #10b981;"><i class="bi bi-person-check-fill"></i></div>
                 <div>
-                    <div class="fw-bold text-dark h4 mb-0"><?= $total_biasa ?></div>
+                    <div class="fw-bold text-dark h4 mb-0"><?= $statistik['biasa'] ?></div>
                     <small class="text-muted fw-bold text-uppercase" style="font-size: 0.7rem;">User Biasa</small>
                 </div>
             </div>
@@ -244,7 +277,7 @@ ob_end_flush();
                 <input type="text" id="liveSearch" class="form-control search-input" placeholder="Cari email atau role...">
             </div>
             <div class="text-muted small fw-bold">
-                <i class="bi bi-filter-right me-1"></i> AKTIF: <?= mysqli_num_rows($q) ?> ENTRI
+                <i class="bi bi-filter-right me-1"></i> AKTIF: <?= count($daftarUser) ?> ENTRI
             </div>
         </div>
 
@@ -261,8 +294,10 @@ ob_end_flush();
                 <tbody>
                     <?php 
                     $no = 1; 
-                    while($d = mysqli_fetch_assoc($q)): 
-                        $is_me = ($d['id'] == $_SESSION['id']);
+                    // Menggunakan FOREACH untuk looping data array dari fungsi
+                    if (!empty($daftarUser)):
+                        foreach($daftarUser as $d): 
+                            $is_me = ($d['id'] == $_SESSION['id']);
                     ?>
                     <tr>
                         <td class="text-center fw-bold text-muted"><?= $no++ ?></td>
@@ -308,7 +343,10 @@ ob_end_flush();
                             </div>
                         </td>
                     </tr>
-                    <?php endwhile; ?>
+                    <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr><td colspan="4" class="text-center py-5">Belum ada data user.</td></tr>
+                    <?php endif; ?>
                 </tbody>
             </table>
         </div>

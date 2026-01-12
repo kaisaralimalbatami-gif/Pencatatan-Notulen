@@ -9,41 +9,96 @@ if (!isset($_SESSION['login'])) {
     exit;
 }
 
-// ambil rapat
-$rapat = mysqli_query($conn, "SELECT * FROM rapat ORDER BY tanggal DESC");
+// 1. PANGGIL KONEKSI (INI SOLUSI ERRORNYA)
+$conn = getDBConnection();
+
+/**
+ * Fungsi Modular: Ambil data rapat untuk dropdown
+ */
+function ambilOpsiRapat($conn) {
+    try {
+        $result = mysqli_query($conn, "SELECT * FROM rapat ORDER BY tanggal DESC");
+        return $result;
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
+/**
+ * Fungsi Modular: Proses Simpan Notulen dengan Prepared Statement
+ */
+function simpanNotulen($conn, $data) {
+    // Mulai Transaksi biar aman
+    $conn->begin_transaction();
+
+    try {
+        // Query Insert dengan Prepared Statement (Lebih Aman dari SQL Injection)
+        $sql = "INSERT INTO notulen 
+                (rapat_id, judul_notulen, agenda, pembahasan, keputusan, tindak_lanjut, penanggung_jawab) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("issssss", 
+            $data['rapat_id'], 
+            $data['judul'], 
+            $data['agenda'], 
+            $data['pembahasan'], 
+            $data['keputusan'], 
+            $data['tindak_lanjut'], 
+            $data['pj']
+        );
+        
+        if (!$stmt->execute()) {
+            throw new Exception("Gagal menyimpan data notulen.");
+        }
+
+        // --- KODE CCTV (LOG AKTIVITAS) ---
+        // Cek file log helper
+        $logPath = __DIR__ . '/../app/helpers/log.php';
+        if (file_exists($logPath)) {
+            require_once $logPath;
+            $log_pesan = "Menambahkan notulen baru: " . $data['judul'];
+            // Pastikan fungsi catat_log ada sebelum dipanggil
+            if (function_exists('catat_log')) {
+                catat_log($conn, $log_pesan);
+            }
+        }
+        // --- SELESAI KODE CCTV ---
+
+        // Commit transaksi jika semua lancar
+        $conn->commit();
+        return true;
+
+    } catch (Exception $e) {
+        // Rollback jika ada error
+        $conn->rollback();
+        error_log("Error Simpan Notulen: " . $e->getMessage());
+        return false;
+    }
+}
+
+// --- LOGIKA UTAMA ---
+
+$rapat = ambilOpsiRapat($conn);
 
 if(isset($_POST['simpan'])){
-    // Gunakan mysqli_real_escape_string untuk keamanan
-    $rapat_id = mysqli_real_escape_string($conn, $_POST['rapat_id']);
-    $judul = mysqli_real_escape_string($conn, $_POST['judul_notulen']);
-    $agenda = mysqli_real_escape_string($conn, $_POST['agenda']);
-    $pembahasan = mysqli_real_escape_string($conn, $_POST['pembahasan']);
-    $keputusan = mysqli_real_escape_string($conn, $_POST['keputusan']);
-    $tindak_lanjut = mysqli_real_escape_string($conn, $_POST['tindak_lanjut']);
-    $pj = mysqli_real_escape_string($conn, $_POST['penanggung_jawab']);
+    $dataInput = [
+        'rapat_id'      => $_POST['rapat_id'],
+        'judul'         => $_POST['judul_notulen'],
+        'agenda'        => $_POST['agenda'],
+        'pembahasan'    => $_POST['pembahasan'],
+        'keputusan'     => $_POST['keputusan'],
+        'tindak_lanjut' => $_POST['tindak_lanjut'],
+        'pj'            => $_POST['penanggung_jawab']
+    ];
 
-    $simpan = mysqli_query($conn,"
-        INSERT INTO notulen
-        (rapat_id, judul_notulen, agenda, pembahasan, keputusan, tindak_lanjut, penanggung_jawab)
-        VALUES ('$rapat_id', '$judul', '$agenda', '$pembahasan', '$keputusan', '$tindak_lanjut', '$pj')
-    ");
-
-    // --- MULAI KODE CCTV (LOG AKTIVITAS) ---
-    if ($simpan) {
-        // PERBAIKAN PATH HELPER LOG DI SINI (ADA TAMBAHAN /app/)
-        // Pastikan file C:\xampp\htdocs\Pencatatan-Notulen\app\helpers\log.php BENAR-BENAR ADA
-        if (file_exists(__DIR__ . '/../app/helpers/log.php')) {
-            require_once __DIR__ . '/../app/helpers/log.php'; 
-            
-            // Catat ke database aktivitas
-            $log_pesan = "Menambahkan notulen baru: " . $judul;
-            catat_log($conn, $log_pesan);
-        }
+    if (simpanNotulen($conn, $dataInput)) {
+        // Redirect sukses
+        header("Location: index.php");
+        exit;
+    } else {
+        echo "<script>alert('Gagal menyimpan notulen. Silakan coba lagi.');</script>";
     }
-    // --- SELESAI KODE CCTV ---
-
-    header("Location: index.php");
-    exit;
 }
 ?>
 <!DOCTYPE html>
@@ -183,15 +238,17 @@ if(isset($_POST['simpan'])){
                             <label class="form-label-custom"><i class="bi bi-calendar-check"></i> Pilih Rapat Terjadwal</label>
                             <select name="rapat_id" class="form-control-custom" id="rapatSelect" required>
                                 <option value="">-- Pilih Rapat --</option>
-                                <?php while($r=mysqli_fetch_assoc($rapat)): ?>
-                                    <option value="<?= $r['id'] ?>" 
-                                            data-judul="<?= htmlspecialchars($r['judul']) ?>"
-                                            data-tanggal="<?= date('d M Y', strtotime($r['tanggal'])) ?>"
-                                            data-waktu="<?= $r['waktu'] ?>"
-                                            data-tempat="<?= htmlspecialchars($r['tempat']) ?>">
-                                        <?= htmlspecialchars($r['judul']) ?> (<?= date('d/m/y', strtotime($r['tanggal'])) ?>)
-                                    </option>
-                                <?php endwhile; ?>
+                                <?php if($rapat): ?>
+                                    <?php while($r=mysqli_fetch_assoc($rapat)): ?>
+                                        <option value="<?= $r['id'] ?>" 
+                                                data-judul="<?= htmlspecialchars($r['judul']) ?>"
+                                                data-tanggal="<?= date('d M Y', strtotime($r['tanggal'])) ?>"
+                                                data-waktu="<?= $r['waktu'] ?>"
+                                                data-tempat="<?= htmlspecialchars($r['tempat']) ?>">
+                                            <?= htmlspecialchars($r['judul']) ?> (<?= date('d/m/y', strtotime($r['tanggal'])) ?>)
+                                        </option>
+                                    <?php endwhile; ?>
+                                <?php endif; ?>
                             </select>
                         </div>
                         <div class="col-md-6">

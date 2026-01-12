@@ -9,6 +9,34 @@ if (!isset($_SESSION['login'])) {
     exit;
 }
 
+// 2. KONEKSI DATABASE
+$conn = getDBConnection();
+
+/**
+ * Fungsi Modular: Ambil Data Notulen Lengkap untuk Cetak
+ */
+function getDataCetakNotulen($conn, $id) {
+    try {
+        $sql = "SELECT 
+                    n.*,
+                    COALESCE(r.judul, 'Rapat tidak ditemukan') as judul_rapat,
+                    r.tanggal, r.waktu, r.tempat, r.peserta, r.status,
+                    COALESCE(u.nama, u.email, 'Administrator') as pembuat_notulen
+                FROM notulen n
+                LEFT JOIN rapat r ON r.id = n.rapat_id
+                LEFT JOIN users u ON u.id = n.created_by
+                WHERE n.id = ?";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        return $stmt->get_result()->fetch_assoc();
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+// 3. VALIDASI ID
 $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 
 if ($id == 0) {
@@ -16,32 +44,23 @@ if ($id == 0) {
     exit;
 }
 
-// 2. QUERY DATA (Ditingkatkan)
-$query = mysqli_query($conn, "
-    SELECT 
-        n.*,
-        COALESCE(r.judul, 'Rapat tidak ditemukan') as judul_rapat,
-        r.tanggal, r.waktu, r.tempat, r.peserta, r.status,
-        u.nama_lengkap as pembuat_notulen
-    FROM notulen n
-    LEFT JOIN rapat r ON r.id = n.rapat_id
-    LEFT JOIN users u ON u.id = n.created_by
-    WHERE n.id = $id
-");
-
-$data = mysqli_fetch_assoc($query);
+// 4. AMBIL DATA
+$data = getDataCetakNotulen($conn, $id);
 
 if (!$data) {
-    header("Location: index.php?error=not_found");
+    echo "<script>alert('Data notulen tidak ditemukan!'); window.location='index.php';</script>";
     exit;
 }
 
-// --- MULAI KODE CCTV (LOG AKTIVITAS) ---
-// Kita catat bahwa user ini sedang membuka/mengunduh PDF
-require_once __DIR__ . '/../app/helpers/log.php';
-$log_pesan = "Mengunduh PDF notulen: " . $data['judul_rapat'];
-catat_log($conn, $log_pesan);
-// --- SELESAI KODE CCTV ---
+// --- LOG AKTIVITAS ---
+$logPath = __DIR__ . '/../app/helpers/log.php';
+if (file_exists($logPath)) {
+    require_once $logPath;
+    if (function_exists('catat_log')) {
+        catat_log($conn, "Mengunduh PDF notulen: " . $data['judul_rapat']);
+    }
+}
+// ---------------------
 
 ob_end_flush();
 ?>
@@ -361,7 +380,7 @@ ob_end_flush();
                 <p style="font-size: 13px;">Jakarta, <?= date('d F Y') ?></p>
                 <p style="font-size: 13px; margin-top: -10px;">Dibuat Oleh,</p>
                 <div class="sig-space"></div>
-                <p class="sig-name"><?= htmlspecialchars($data['pembuat_notulen'] ?? 'Administrator') ?></p>
+                <p class="sig-name"><?= htmlspecialchars($data['pembuat_notulen']) ?></p>
                 <p style="font-size: 12px; color: var(--secondary-gray);">Sekretaris Rapat</p>
             </div>
         </div>

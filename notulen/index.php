@@ -1,42 +1,77 @@
 <?php
 session_start();
 require_once __DIR__.'/../app/config/database.php';
+require_once __DIR__.'/../include/navbar.php';
 
-// Proteksi Halaman
+// 1. Proteksi Halaman
 if (!isset($_SESSION['login'])) {
     header("Location: ../auth/login.php");
     exit;
 }
 
-// Query data notulen - Mengambil status dari tabel rapat (r.status)
-$q = mysqli_query($conn,"
-  SELECT n.id, n.judul_notulen, n.dibuat_pada, r.judul as judul_rapat, r.status, r.tanggal, r.waktu
-  FROM notulen n
-  JOIN rapat r ON r.id = n.rapat_id
-  ORDER BY n.dibuat_pada DESC
-");
+$conn = getDBConnection();
 
-// Hitung statistik
-$total_query = mysqli_query($conn, "SELECT COUNT(*) as total FROM notulen");
-$total_row = mysqli_fetch_assoc($total_query);
-$total_notulen = $total_row['total'];
+/**
+ * Fungsi Modular: Mengambil semua data notulen beserta info rapatnya
+ */
+function ambilDaftarNotulen($conn) {
+    try {
+        // Cek dulu tabelnya ada atau nggak biar safe
+        $cekTabel = mysqli_query($conn, "SHOW TABLES LIKE 'notulen'");
+        if (mysqli_num_rows($cekTabel) == 0) return [];
 
-$week_query = mysqli_query($conn, "
-    SELECT COUNT(*) as weekly 
-    FROM notulen 
-    WHERE YEARWEEK(dibuat_pada, 1) = YEARWEEK(CURDATE(), 1)
-");
-$week_row = mysqli_fetch_assoc($week_query);
-$weekly_notulen = $week_row['weekly'];
+        $sql = "SELECT n.id, n.judul_notulen, n.dibuat_pada, r.judul as judul_rapat, r.status, r.tanggal, r.waktu
+                FROM notulen n
+                JOIN rapat r ON r.id = n.rapat_id
+                ORDER BY n.dibuat_pada DESC";
+        
+        $result = mysqli_query($conn, $sql);
+        return mysqli_fetch_all($result, MYSQLI_ASSOC);
 
-$today_query = mysqli_query($conn, "
-    SELECT COUNT(*) as today_count 
-    FROM notulen 
-    WHERE DATE(dibuat_pada) = CURDATE()
-");
-$today_row = mysqli_fetch_assoc($today_query);
-$today_count = $today_row['today_count'];
+    } catch (Exception $e) {
+        error_log("Error Ambil Notulen: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Fungsi Modular: Menghitung statistik notulen (Total, Mingguan, Harian)
+ */
+function ambilStatistikNotulen($conn) {
+    $stats = [
+        'total' => 0,
+        'weekly' => 0,
+        'today' => 0
+    ];
+
+    try {
+        $cekTabel = mysqli_query($conn, "SHOW TABLES LIKE 'notulen'");
+        if (mysqli_num_rows($cekTabel) == 0) return $stats;
+
+        // A. Total Notulen
+        $q1 = mysqli_query($conn, "SELECT COUNT(*) as total FROM notulen");
+        if($q1) $stats['total'] = mysqli_fetch_assoc($q1)['total'];
+
+        // B. Minggu Ini
+        $q2 = mysqli_query($conn, "SELECT COUNT(*) as weekly FROM notulen WHERE YEARWEEK(dibuat_pada, 1) = YEARWEEK(CURDATE(), 1)");
+        if($q2) $stats['weekly'] = mysqli_fetch_assoc($q2)['weekly'];
+
+        // C. Hari Ini
+        $q3 = mysqli_query($conn, "SELECT COUNT(*) as today FROM notulen WHERE DATE(dibuat_pada) = CURDATE()");
+        if($q3) $stats['today'] = mysqli_fetch_assoc($q3)['today'];
+
+    } catch (Exception $e) {
+        error_log("Error Statistik Notulen: " . $e->getMessage());
+    }
+
+    return $stats;
+}
+
+// 2. Eksekusi Logika
+$daftarNotulen = ambilDaftarNotulen($conn);
+$statistik = ambilStatistikNotulen($conn);
 ?>
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -112,7 +147,7 @@ $today_count = $today_row['today_count'];
         .btn-action {
             padding: 8px 15px; border-radius: 10px; font-size: 0.75rem; font-weight: 700;
             display: inline-flex; align-items: center; gap: 8px; text-decoration: none; transition: 0.2s;
-            border: none; cursor: pointer; /* Biar tombol button juga rapi */
+            border: none; cursor: pointer;
         }
         .btn-det { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
         .btn-det:hover { background: #0ea5e9; color: white; }
@@ -120,7 +155,6 @@ $today_count = $today_row['today_count'];
         .btn-pdf { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
         .btn-pdf:hover { background: #ef4444; color: white; }
         
-        /* STYLE TOMBOL SHARE UNIVERSAL (UNGU) */
         .btn-share { background: #e0e7ff; color: #4338ca; border: 1px solid #c7d2fe; }
         .btn-share:hover { background: #4f46e5; color: white; transform: translateY(-2px); }
 
@@ -130,7 +164,6 @@ $today_count = $today_row['today_count'];
         .btn-hps { background: #fff1f2; color: #be123c; border: 1px solid #ffe4e6; }
         .btn-hps:hover { background: #e11d48; color: white; }
 
-        /* TOMBOL INPUT BARU */
         .btn-create {
             background: #0ea5e9; 
             color: white; 
@@ -160,8 +193,6 @@ $today_count = $today_row['today_count'];
         <li></li><li></li><li></li>
     </ul>
 
-    <?php require_once __DIR__.'/../include/navbar.php'; ?>
-
     <div class="container-fluid px-3 px-md-4 mt-4">
         <div class="card card-custom">
             <div class="card-header card-header-custom">
@@ -172,15 +203,15 @@ $today_count = $today_row['today_count'];
                 <div class="stats-container">
                     <div class="stat-card">
                         <i class="bi bi-journals fs-2 text-primary"></i>
-                        <div class="stat-info"><h3><?= $total_notulen ?></h3><p>TOTAL NOTULEN</p></div>
+                        <div class="stat-info"><h3><?= $statistik['total'] ?></h3><p>TOTAL NOTULEN</p></div>
                     </div>
                     <div class="stat-card" style="border-left-color: #0ea5e9;">
                         <i class="bi bi-calendar-check fs-2 text-info"></i>
-                        <div class="stat-info"><h3><?= $weekly_notulen ?></h3><p>MINGGU INI</p></div>
+                        <div class="stat-info"><h3><?= $statistik['weekly'] ?></h3><p>MINGGU INI</p></div>
                     </div>
                     <div class="stat-card" style="border-left-color: #f59e0b;">
                         <i class="bi bi-clock-history fs-2 text-warning"></i>
-                        <div class="stat-info"><h3><?= $today_count ?></h3><p>HARI INI</p></div>
+                        <div class="stat-info"><h3><?= $statistik['today'] ?></h3><p>HARI INI</p></div>
                     </div>
                 </div>
 
@@ -215,8 +246,8 @@ $today_count = $today_row['today_count'];
                             </tr>
                         </thead>
                         <tbody>
-                            <?php if (mysqli_num_rows($q) > 0): ?>
-                                <?php while($d = mysqli_fetch_assoc($q)): ?>
+                            <?php if (!empty($daftarNotulen)): ?>
+                                <?php foreach($daftarNotulen as $d): ?>
                                 <tr>
                                     <td>
                                         <div class="fw-bold"><?= htmlspecialchars($d['judul_rapat']) ?></div>
@@ -268,7 +299,7 @@ $today_count = $today_row['today_count'];
                                         </div>
                                     </td>
                                 </tr>
-                                <?php endwhile; ?>
+                                <?php endforeach; ?>
                             <?php else: ?>
                                 <tr>
                                     <td colspan="5" class="text-center py-5 text-muted">Belum ada data notulen.</td>
@@ -295,7 +326,6 @@ $today_count = $today_row['today_count'];
         // Script Smart Share
         async function shareNative(judul, teks, url) {
             if (navigator.share) {
-                // Mode HP: Buka Menu Share Native
                 try {
                     await navigator.share({
                         title: judul,
@@ -306,7 +336,6 @@ $today_count = $today_row['today_count'];
                     console.log('User membatalkan share');
                 }
             } else {
-                // Mode PC: Copy Link
                 navigator.clipboard.writeText(url).then(function() {
                     alert('Link notulen berhasil disalin ke clipboard! 📋');
                 }, function(err) {

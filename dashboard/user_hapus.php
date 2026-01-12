@@ -9,41 +9,72 @@ if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'admin') {
     exit;
 }
 
-// 2. VALIDASI ID
+// 2. KONEKSI DATABASE
+$conn = getDBConnection();
+
+/**
+ * Fungsi Modular: Ambil Data User (untuk konfirmasi nama/email sebelum hapus)
+ */
+function getUserById($conn, $id) {
+    try {
+        $stmt = $conn->prepare("SELECT * FROM users WHERE id = ?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        return $stmt->get_result()->fetch_assoc();
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+/**
+ * Fungsi Modular: Hapus User
+ */
+function deleteUser($conn, $id) {
+    try {
+        $stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
+        $stmt->bind_param("i", $id);
+        return $stmt->execute();
+    } catch (Exception $e) {
+        error_log("Error Delete User: " . $e->getMessage());
+        return false;
+    }
+}
+
+// 3. VALIDASI ID
 if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
     header("Location: user_manage.php");
     exit;
 }
 
-$id = (int)$_GET['id'];
-$current_admin_id = $_SESSION['user_id'] ?? 0;
+$id_target = (int)$_GET['id'];
+$id_saya   = $_SESSION['id']; // ID Admin yang sedang login
 
-// 3. AMBIL DATA USER
-$query = mysqli_query($conn, "SELECT * FROM users WHERE id = '$id'");
-$user = mysqli_fetch_assoc($query);
+// 4. AMBIL DATA USER TARGET
+$user = getUserById($conn, $id_target);
 
 if (!$user) {
-    header("Location: user_manage.php");
+    echo "<script>alert('User tidak ditemukan!'); window.location='user_manage.php';</script>";
     exit;
 }
 
-// 4. LOGIKA PROTEKSI (Anti-hapus diri sendiri)
-if ($id == $current_admin_id) {
-    $_SESSION['error'] = 'Gagal: Anda tidak bisa menghapus akun sendiri!';
-    header("Location: user_manage.php");
+// 5. PROTEKSI: JANGAN HAPUS DIRI SENDIRI
+if ($id_target == $id_saya) {
+    echo "<script>alert('GAGAL: Anda tidak dapat menghapus akun Anda sendiri!'); window.location='user_manage.php';</script>";
     exit;
 }
 
-// 5. PROSES HAPUS
+// 6. PROSES EKSEKUSI HAPUS
 if (isset($_POST['execute_delete'])) {
-    $target = $user['email'];
-    if (mysqli_query($conn, "DELETE FROM users WHERE id = '$id'")) {
-        $_SESSION['success'] = "User $target berhasil dihapus!";
+    $target_email = $user['email'];
+    
+    if (deleteUser($conn, $id_target)) {
+        // Sukses
+        echo "<script>alert('User $target_email berhasil dihapus permanen.'); window.location='user_manage.php';</script>";
+        exit;
     } else {
-        $_SESSION['error'] = "Gagal menghapus user.";
+        // Gagal
+        $error = "Terjadi kesalahan sistem saat menghapus user.";
     }
-    header("Location: user_manage.php");
-    exit;
 }
 
 // INCLUDE NAVBAR
@@ -75,12 +106,11 @@ ob_end_flush();
             100% { background-position: 0% 50%; }
         }
 
-        /* WRAPPER KHUSUS AGAR NAVBAR TIDAK TERGANGGU */
         .main-wrapper {
             display: flex;
             align-items: center;
             justify-content: center;
-            min-height: calc(100vh - 80px); /* Kurangi tinggi navbar sekitar 80px */
+            min-height: calc(100vh - 80px);
             padding: 20px;
         }
 
@@ -174,6 +204,10 @@ ob_end_flush();
             <h5 class="fw-bold text-dark mb-1">Hapus Pengguna</h5>
             <p class="text-muted small mb-0">Tindakan ini tidak dapat dibatalkan.</p>
         </div>
+
+        <?php if(isset($error)): ?>
+            <div class="alert alert-danger py-2 small"><?= $error ?></div>
+        <?php endif; ?>
 
         <div class="user-info-box">
             <span class="text-uppercase x-small fw-bold text-muted d-block mb-1" style="font-size: 0.7rem;">Target User:</span>

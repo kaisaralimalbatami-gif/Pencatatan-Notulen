@@ -2,30 +2,82 @@
 session_start();
 require_once __DIR__ . '/../app/config/database.php';
 
-// 1. PROTEKSI: Cek login & Role Admin
+// 1. KONEKSI DATABASE
+$conn = getDBConnection();
+
+// 2. PROTEKSI: Cek login & Role Admin
 if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'admin') {
     $_SESSION['error'] = 'Anda tidak memiliki izin untuk menghapus data!';
     header("Location: index.php");
     exit;
 }
 
-// 2. PROSES HAPUS (Jika form disubmit)
+/**
+ * Fungsi Modular: Ambil Data Notulen untuk Konfirmasi
+ */
+function getNotulenInfo($conn, $id) {
+    try {
+        $sql = "SELECT n.id, n.judul_notulen, r.judul as judul_rapat, r.tanggal 
+                FROM notulen n 
+                LEFT JOIN rapat r ON r.id = n.rapat_id 
+                WHERE n.id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        return $stmt->get_result()->fetch_assoc();
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+/**
+ * Fungsi Modular: Eksekusi Hapus
+ */
+function hapusNotulen($conn, $id) {
+    try {
+        $stmt = $conn->prepare("DELETE FROM notulen WHERE id = ?");
+        $stmt->bind_param("i", $id);
+        return $stmt->execute();
+    } catch (Exception $e) {
+        error_log("Error Hapus Notulen: " . $e->getMessage());
+        return false;
+    }
+}
+
+// 3. PROSES HAPUS (Jika form disubmit)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_delete'])) {
     $id_to_delete = (int)$_POST['id'];
     
-    $delete_query = mysqli_query($conn, "DELETE FROM notulen WHERE id = '$id_to_delete'");
+    // Ambil data dulu untuk log
+    $dataNotulen = getNotulenInfo($conn, $id_to_delete);
     
-    if ($delete_query) {
-        $_SESSION['success'] = 'Notulen berhasil dihapus secara permanen.';
+    if ($dataNotulen) {
+        $judul = $dataNotulen['judul_notulen'];
+
+        if (hapusNotulen($conn, $id_to_delete)) {
+            // --- LOG AKTIVITAS ---
+            $logPath = __DIR__ . '/../app/helpers/log.php';
+            if (file_exists($logPath)) {
+                require_once $logPath;
+                if (function_exists('catat_log')) {
+                    catat_log($conn, "Menghapus notulen: " . $judul);
+                }
+            }
+            // ---------------------
+
+            $_SESSION['success'] = 'Notulen berhasil dihapus secara permanen.';
+        } else {
+            $_SESSION['error'] = 'Gagal menghapus data. Silakan coba lagi.';
+        }
     } else {
-        $_SESSION['error'] = 'Gagal menghapus data: ' . mysqli_error($conn);
+        $_SESSION['error'] = 'Data tidak ditemukan.';
     }
     
     header("Location: index.php");
     exit;
 }
 
-// 3. VALIDASI ID UNTUK TAMPILAN
+// 4. VALIDASI ID UNTUK TAMPILAN
 if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
     $_SESSION['error'] = 'ID tidak valid!';
     header("Location: index.php");
@@ -33,22 +85,13 @@ if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
 }
 
 $id = (int)$_GET['id'];
+$notulen = getNotulenInfo($conn, $id);
 
-// Ambil data untuk ditampilkan di halaman konfirmasi
-$query = mysqli_query($conn, "
-    SELECT n.*, r.judul as judul_rapat, r.tanggal 
-    FROM notulen n 
-    LEFT JOIN rapat r ON r.id = n.rapat_id 
-    WHERE n.id = '$id'
-");
-
-if (mysqli_num_rows($query) == 0) {
+if (!$notulen) {
     $_SESSION['error'] = 'Data tidak ditemukan!';
     header("Location: index.php");
     exit;
 }
-
-$notulen = mysqli_fetch_assoc($query);
 ?>
 <!DOCTYPE html>
 <html lang="id">

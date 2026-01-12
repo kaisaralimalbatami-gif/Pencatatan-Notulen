@@ -1,42 +1,95 @@
 <?php
+// AWALI DENGAN OUTPUT BUFFERING
+ob_start();
+
 session_start();
 require_once __DIR__ . '/../app/config/database.php';
 
-// Validasi session dan role
+// 1. PROTEKSI HALAMAN
 if (!isset($_SESSION['login'])) {
     header("Location: ../auth/login.php");
     exit;
 }
 
-// Validasi id
-if (!isset($_GET['id'])) {
+// 2. KONEKSI DATABASE
+$conn = getDBConnection();
+
+/**
+ * Fungsi Modular: Ambil Data Rapat
+ */
+function getRapatById($conn, $id) {
+    try {
+        $stmt = $conn->prepare("SELECT * FROM rapat WHERE id = ?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        return $stmt->get_result()->fetch_assoc();
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+/**
+ * Fungsi Modular: Hapus Rapat
+ */
+function deleteRapat($conn, $id) {
+    try {
+        $stmt = $conn->prepare("DELETE FROM rapat WHERE id = ?");
+        $stmt->bind_param("i", $id);
+        
+        if ($stmt->execute()) {
+            // Log Aktivitas
+            $logPath = __DIR__ . '/../app/helpers/log.php';
+            if (file_exists($logPath)) {
+                require_once $logPath;
+                if (function_exists('catat_log')) {
+                    catat_log($conn, "Menghapus rapat ID: " . $id);
+                }
+            }
+            return true;
+        }
+        return false;
+    } catch (Exception $e) {
+        error_log("Error Hapus Rapat: " . $e->getMessage());
+        return false;
+    }
+}
+
+// 3. PROSES EKSEKUSI HAPUS (VIA POST)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_delete'])) {
+    $id_to_delete = (int)$_POST['id'];
+    
+    if (deleteRapat($conn, $id_to_delete)) {
+        $_SESSION['success_message'] = "Rapat berhasil dihapus!";
+    } else {
+        $_SESSION['error_message'] = "Gagal menghapus rapat.";
+    }
+    
     header("Location: index.php");
     exit;
 }
 
-$id = $_GET['id'];
-
-// Cek apakah data ada
-$check_query = mysqli_query($conn, "SELECT * FROM rapat WHERE id='$id'");
-if (mysqli_num_rows($check_query) == 0) {
-    header("Location: index.php?error=Data tidak ditemukan");
+// 4. TAMPILAN KONFIRMASI (VIA GET)
+if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
+    header("Location: index.php");
     exit;
 }
 
-$rapat = mysqli_fetch_assoc($check_query);
+$id = (int)$_GET['id'];
+$rapat = getRapatById($conn, $id);
 
-// Jika sudah dikonfirmasi hapus
-if (isset($_GET['confirm']) && $_GET['confirm'] == 'yes') {
-    mysqli_query($conn, "DELETE FROM rapat WHERE id='$id'");
-    header("Location: index.php?success=Rapat berhasil dihapus");
+if (!$rapat) {
+    echo "<script>alert('Data tidak ditemukan!'); window.location='index.php';</script>";
     exit;
 }
+
+// Navbar di-include di sini biar rapi
+// (Opsional, kalau desainnya full page warning biasanya gak pake navbar, tapi gw ikutin style lu)
 ?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <title>Konfirmasi Hapus | NotulenKita</title>
+    <title>Hapus Rapat | NotulenKita</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
@@ -65,6 +118,7 @@ if (isset($_GET['confirm']) && $_GET['confirm'] == 'yes') {
             align-items: center;
             justify-content: center;
             padding: 40px 20px;
+            min-height: 80vh;
         }
 
         .delete-card {
@@ -132,12 +186,14 @@ if (isset($_GET['confirm']) && $_GET['confirm'] == 'yes') {
             justify-content: center;
             gap: 8px;
             transition: all 0.3s;
+            width: 100%;
+            border: none;
+            cursor: pointer;
         }
 
         .btn-confirm {
             background: #ef4444;
             color: white;
-            border: none;
         }
 
         .btn-confirm:hover {
@@ -150,6 +206,7 @@ if (isset($_GET['confirm']) && $_GET['confirm'] == 'yes') {
         .btn-cancel {
             background: #f1f5f9;
             color: #475569;
+            text-align: center;
         }
 
         .btn-cancel:hover {
@@ -187,34 +244,42 @@ if (isset($_GET['confirm']) && $_GET['confirm'] == 'yes') {
                     </div>
                     <div class="col-6">
                         <div class="preview-label">Status</div>
-                        <div class="preview-value text-primary"><?= $rapat['status'] ?></div>
+                        <div class="preview-value text-primary"><?= htmlspecialchars($rapat['status']) ?></div>
                     </div>
                 </div>
             </div>
 
-            <div class="row g-3">
-                <div class="col-12">
-                    <a href="hapus.php?id=<?= $id ?>&confirm=yes" class="btn-action btn-confirm" id="btnDel">
-                        <i class="bi bi-trash3-fill"></i> Ya, Hapus Sekarang
-                    </a>
+            <form method="POST">
+                <input type="hidden" name="id" value="<?= $id ?>">
+                <input type="hidden" name="confirm_delete" value="1">
+                
+                <div class="row g-3">
+                    <div class="col-12">
+                        <button type="submit" class="btn-action btn-confirm" id="btnDel">
+                            <i class="bi bi-trash3-fill"></i> Ya, Hapus Sekarang
+                        </button>
+                    </div>
+                    <div class="col-12">
+                        <a href="index.php" class="btn-action btn-cancel">
+                            Batal, Simpan Data
+                        </a>
+                    </div>
                 </div>
-                <div class="col-12">
-                    <a href="index.php" class="btn-action btn-cancel">
-                        Batal, Simpan Data
-                    </a>
-                </div>
-            </div>
+            </form>
+
         </div>
     </div>
 </div>
 
 <script>
     document.getElementById('btnDel').addEventListener('click', function(e) {
+        // Konfirmasi di sisi client juga biar double check
         if(!confirm('Konfirmasi terakhir: Yakin hapus?')) {
             e.preventDefault();
         } else {
             this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Menghapus...';
             this.style.pointerEvents = 'none';
+            this.closest('form').submit();
         }
     });
 </script>

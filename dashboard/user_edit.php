@@ -1,5 +1,7 @@
 <?php
+// AWALI DENGAN OUTPUT BUFFERING
 ob_start();
+
 session_start();
 require_once __DIR__ . '/../app/config/database.php';
 
@@ -9,37 +11,77 @@ if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'admin') {
     exit;
 }
 
-// 2. VALIDASI ID
+// 2. KONEKSI DATABASE
+$conn = getDBConnection();
+
+/**
+ * Fungsi Modular: Ambil Data User berdasarkan ID
+ */
+function getUserById($conn, $id) {
+    try {
+        $stmt = $conn->prepare("SELECT * FROM users WHERE id = ?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        return $result->fetch_assoc();
+    } catch (Exception $e) {
+        error_log("Error Get User: " . $e->getMessage());
+        return null;
+    }
+}
+
+/**
+ * Fungsi Modular: Update Data User
+ */
+function updateUser($conn, $id, $nama, $role) {
+    try {
+        // Gunakan Prepared Statement untuk keamanan maksimal
+        $stmt = $conn->prepare("UPDATE users SET nama = ?, role = ? WHERE id = ?");
+        $stmt->bind_param("ssi", $nama, $role, $id);
+        
+        if ($stmt->execute()) {
+            return true;
+        } else {
+            return false;
+        }
+    } catch (Exception $e) {
+        error_log("Error Update User: " . $e->getMessage());
+        return false;
+    }
+}
+
+// 3. VALIDASI ID & AMBIL DATA
 if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
     header("Location: user_manage.php");
     exit;
 }
 
-$id = (int)$_GET['id'];
+$id_user = (int)$_GET['id'];
+$user = getUserById($conn, $id_user);
 
-// 3. AMBIL DATA USER
-$query = mysqli_query($conn, "SELECT * FROM users WHERE id = '$id'");
-$user = mysqli_fetch_assoc($query);
-
+// Jika user tidak ditemukan
 if (!$user) {
     header("Location: user_manage.php");
     exit;
 }
 
-// 4. PROSES UPDATE (PERBAIKAN ERROR DI SINI)
+// 4. PROSES UPDATE FORM
+$error = "";
 if (isset($_POST['update_user'])) {
-    // Gunakan mysqli_real_escape_string (fungsi bawaan yang benar)
-    $nama = mysqli_real_escape_string($conn, $_POST['nama_lengkap']);
-    $role = mysqli_real_escape_string($conn, $_POST['role']);
+    $nama = $_POST['nama']; // Sesuai kolom database 'nama'
+    $role = $_POST['role'];
     
-    $update = mysqli_query($conn, "UPDATE users SET nama_lengkap = '$nama', role = '$role' WHERE id = '$id'");
-    
-    if ($update) {
-        $_SESSION['success'] = "Data user berhasil diperbarui!";
-        header("Location: user_manage.php");
-        exit;
+    // Validasi sederhana
+    if (empty($nama)) {
+        $error = "Nama tidak boleh kosong.";
     } else {
-        $error = "Gagal memperbarui data: " . mysqli_error($conn);
+        if (updateUser($conn, $id_user, $nama, $role)) {
+            // Redirect sukses
+            echo "<script>alert('Data berhasil diperbarui!'); window.location='user_manage.php';</script>";
+            exit;
+        } else {
+            $error = "Terjadi kesalahan saat menyimpan data.";
+        }
     }
 }
 
@@ -163,7 +205,7 @@ ob_end_flush();
             <p class="text-muted mb-0 small">ID Pengguna: <span class="user-badge-info">#<?= $user['id'] ?></span></p>
         </div>
 
-        <?php if(isset($error)): ?>
+        <?php if(!empty($error)): ?>
             <div class="alert alert-danger rounded-4 border-0"><?= $error ?></div>
         <?php endif; ?>
 
@@ -175,7 +217,7 @@ ob_end_flush();
 
             <div class="mb-3">
                 <label class="form-label">Nama Lengkap</label>
-                <input type="text" name="nama_lengkap" class="form-control" value="<?= htmlspecialchars($user['nama_lengkap']) ?>" required>
+                <input type="text" name="nama" class="form-control" value="<?= htmlspecialchars($user['nama']) ?>" required>
             </div>
 
             <div class="mb-4">

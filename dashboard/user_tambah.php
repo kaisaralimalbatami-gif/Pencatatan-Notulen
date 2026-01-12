@@ -5,32 +5,79 @@ ob_start();
 session_start();
 require_once __DIR__ . '/../app/config/database.php';
 
-// PROTEKSI ADMIN ONLY
+// 1. PROTEKSI ADMIN ONLY
 if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'admin') {
     header("Location: ../auth/login.php");
     exit;
 }
 
-// PROSES SIMPAN DATA
-if (isset($_POST['simpan'])) {
-    $email = mysqli_real_escape_string($conn, $_POST['email']);
-    $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
-    $role = mysqli_real_escape_string($conn, $_POST['role']);
+// 2. KONEKSI DATABASE
+$conn = getDBConnection();
 
-    // Gunakan Prepared Statement agar lebih aman bro
-    $stmt = $conn->prepare("INSERT INTO users (email, password, role) VALUES (?, ?, ?)");
-    $stmt->bind_param("sss", $email, $password, $role);
-
-    if ($stmt->execute()) {
-        header("Location: user_manage.php?status=success");
-    } else {
-        $error = "Gagal menambah user: " . $conn->error;
+/**
+ * Fungsi Modular: Cek Email Terdaftar
+ */
+function isEmailExist($conn, $email) {
+    try {
+        $stmt = $conn->prepare("SELECT id FROM users WHERE email = ?");
+        $stmt->bind_param("s", $email);
+        $stmt->execute();
+        $stmt->store_result();
+        return $stmt->num_rows > 0;
+    } catch (Exception $e) {
+        return false;
     }
-    $stmt->close();
-    exit;
 }
 
-// INCLUDE NAVBAR SETELAH PROSES LOGIKA
+/**
+ * Fungsi Modular: Tambah User Baru
+ */
+function tambahUser($conn, $nama, $email, $password, $role) {
+    try {
+        // Hash password
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+
+        // Query Insert (Tambahkan kolom 'nama' agar sesuai database)
+        $sql = "INSERT INTO users (nama, email, password, role) VALUES (?, ?, ?, ?)";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("ssss", $nama, $email, $hash, $role);
+
+        if ($stmt->execute()) {
+            return true;
+        } else {
+            throw new Exception("Gagal eksekusi query.");
+        }
+    } catch (Exception $e) {
+        error_log("Error Tambah User: " . $e->getMessage());
+        return false;
+    }
+}
+
+// 3. PROSES SIMPAN DATA
+$error = "";
+$success = "";
+
+if (isset($_POST['simpan'])) {
+    $nama     = $_POST['nama'];
+    $email    = $_POST['email'];
+    $password = $_POST['password'];
+    $role     = $_POST['role'];
+
+    // Validasi dasar
+    if (isEmailExist($conn, $email)) {
+        $error = "Email sudah terdaftar! Gunakan email lain.";
+    } else {
+        if (tambahUser($conn, $nama, $email, $password, $role)) {
+            // Redirect sukses
+            echo "<script>alert('User berhasil ditambahkan!'); window.location='user_manage.php';</script>";
+            exit;
+        } else {
+            $error = "Terjadi kesalahan sistem saat menyimpan data.";
+        }
+    }
+}
+
+// INCLUDE NAVBAR
 require_once __DIR__ . '/../include/navbar.php';
 ob_end_flush();
 ?>
@@ -180,8 +227,18 @@ ob_end_flush();
         </div>
 
         <div class="card-body">
+            
+            <?php if(!empty($error)): ?>
+                <div class="alert alert-danger rounded-4 border-0 mb-4"><?= $error ?></div>
+            <?php endif; ?>
+
             <form method="post" id="registrationForm">
                 
+                <div class="mb-4">
+                    <label class="form-label"><i class="bi bi-person me-2"></i>Nama Lengkap</label>
+                    <input type="text" name="nama" class="form-control" placeholder="Nama Lengkap User" required>
+                </div>
+
                 <div class="mb-4">
                     <label class="form-label"><i class="bi bi-envelope me-2"></i>Alamat Email</label>
                     <input type="email" name="email" class="form-control" placeholder="user@notulenkita.com" required>

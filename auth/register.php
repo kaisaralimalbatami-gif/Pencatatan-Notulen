@@ -1,47 +1,99 @@
 <?php
-include "../app/config/database.php";
+require_once "../app/config/database.php";
 
 $error = "";
 $success = "";
 
+/**
+ * Fungsi: Cek apakah email sudah ada di database
+ * Menggunakan Prepared Statement untuk keamanan
+ */
+function cekEmailTerdaftar($conn, $email) {
+    try {
+        $stmt = $conn->prepare("SELECT id FROM users WHERE email = ?");
+        $stmt->bind_param("s", $email);
+        $stmt->execute();
+        $stmt->store_result();
+        
+        // Return true jika email ketemu (row > 0)
+        return $stmt->num_rows > 0;
+    } catch (Exception $e) {
+        error_log("Error Cek Email: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Fungsi: Menangani proses insert user dan log aktivitas sekaligus
+ * Menggunakan Transaction untuk menjaga konsistensi data
+ */
+function prosesRegistrasiUser($conn, $nama, $email, $password, $role) {
+    // Mulai transaksi database
+    $conn->begin_transaction();
+
+    try {
+        // 1. Hash Password
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+
+        // 2. Insert ke tabel Users
+        $stmt = $conn->prepare("INSERT INTO users (nama, email, password, role) VALUES (?, ?, ?, ?)");
+        $stmt->bind_param("ssss", $nama, $email, $hash, $role);
+        
+        if (!$stmt->execute()) {
+            throw new Exception("Gagal insert user");
+        }
+
+        // Ambil ID user yang baru dibuat
+        $new_user_id = $conn->insert_id;
+
+        // 3. Insert ke tabel Aktivitas (Log Manual)
+        $aksi = "Mendaftar akun baru sebagai " . ucfirst($role);
+        $stmtLog = $conn->prepare("INSERT INTO aktivitas (user_id, nama_user, aksi) VALUES (?, ?, ?)");
+        $stmtLog->bind_param("iss", $new_user_id, $nama, $aksi);
+        
+        if (!$stmtLog->execute()) {
+            throw new Exception("Gagal catat log");
+        }
+
+        // Jika semua sukses, simpan permanen (Commit)
+        $conn->commit();
+        return true;
+
+    } catch (Exception $e) {
+        // Jika ada error di tengah jalan, batalkan semua perubahan (Rollback)
+        $conn->rollback();
+        error_log("Error Registrasi: " . $e->getMessage());
+        return false;
+    }
+}
+
+// --- LOGIKA UTAMA (CONTROLLER) ---
+
 if (isset($_POST['register'])) {
-    $nama     = mysqli_real_escape_string($conn, $_POST['nama']);
-    $email    = mysqli_real_escape_string($conn, $_POST['email']);
+    $conn = getDBConnection();
+
+    // Ambil input
+    $nama     = $_POST['nama'];
+    $email    = $_POST['email'];
     $password = $_POST['password'];
     $confirm  = $_POST['confirm'];
     $role     = $_POST['role'];
 
+    // Validasi input dasar
     if ($password != $confirm) {
         $error = "Password dan konfirmasi tidak sama!";
     } else {
-        $hash = password_hash($password, PASSWORD_DEFAULT);
-
-        $cek = mysqli_query($conn, "SELECT * FROM users WHERE email='$email'");
-        if (mysqli_num_rows($cek) > 0) {
+        // Cek ketersediaan email
+        if (cekEmailTerdaftar($conn, $email)) {
             $error = "Email sudah terdaftar!";
         } else {
+            // Proses Registrasi
+            $isSuccess = prosesRegistrasiUser($conn, $nama, $email, $password, $role);
 
-            // 1. INSERT USER KE DATABASE
-            $q_insert = mysqli_query($conn, "
-                INSERT INTO users (nama, email, password, role)
-                VALUES ('$nama','$email','$hash','$role')
-            ");
-
-            if ($q_insert) {
-                // 2. AMBIL ID USER YANG BARU AJA DIBUAT
-                $new_user_id = mysqli_insert_id($conn);
-
-                // 3. CATAT AKTIVITAS SECARA MANUAL
-                // (Kita ga pake helper log.php karena user belum login session)
-                $aksi = "Mendaftar akun baru sebagai " . ucfirst($role);
-                
-                // Pastikan nama kolomnya sesuai tabel 'aktivitas' (user_id, nama_user, aksi)
-                $q_log = "INSERT INTO aktivitas (user_id, nama_user, aksi) VALUES ('$new_user_id', '$nama', '$aksi')";
-                mysqli_query($conn, $q_log);
-
+            if ($isSuccess) {
                 $success = "Registrasi berhasil! Silakan login.";
             } else {
-                $error = "Gagal mendaftar: " . mysqli_error($conn);
+                $error = "Terjadi kesalahan sistem saat mendaftar. Silakan coba lagi.";
             }
         }
     }
