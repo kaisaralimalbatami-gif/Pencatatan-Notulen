@@ -3,26 +3,45 @@ session_start();
 require_once __DIR__.'/../app/config/database.php';
 require_once __DIR__.'/../include/navbar.php';
 
+// 1. Proteksi Halaman
 if (!isset($_SESSION['login'])) {
     header("Location: ../auth/login.php");
     exit;
 }
 
-$q = mysqli_query($conn, "SELECT * FROM rapat ORDER BY tanggal DESC");
+$conn = getDBConnection();
 
+/**
+ * Fungsi Modular: Mengambil semua data rapat
+ * Menggunakan Try-Catch untuk menangani error database
+ */
+function ambilDaftarRapat($conn) {
+    try {
+        // Query ambil data urut dari yang terbaru
+        $sql = "SELECT * FROM rapat ORDER BY tanggal DESC";
+        $result = mysqli_query($conn, $sql);
+        
+        // Kembalikan sebagai array associative biar gampang di-loop
+        return mysqli_fetch_all($result, MYSQLI_ASSOC);
+
+    } catch (Exception $e) {
+        // Catat error ke log server
+        error_log("Error Ambil Rapat: " . $e->getMessage());
+        return []; // Kembalikan array kosong agar web tidak crash
+    }
+}
+
+// 2. Eksekusi Logika
+$daftarRapat = ambilDaftarRapat($conn);
+
+// 3. Handle Flash Message (Pesan Sukses)
+$successMessage = '';
 if(isset($_SESSION['success_message'])) {
-    echo '<div class="container mt-3" style="position: relative; z-index: 10;">
-            <div class="alert alert-success alert-dismissible fade show border-0 shadow-lg" role="alert" style="border-radius: 15px;">
-                <div class="d-flex align-items-center">
-                    <i class="bi bi-check-circle-fill me-3 fs-4 text-success"></i>
-                    <div><strong>Berhasil!</strong> ' . $_SESSION['success_message'] . '</div>
-                </div>
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-            </div>
-          </div>';
+    $successMessage = $_SESSION['success_message'];
     unset($_SESSION['success_message']);
 }
 ?>
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -136,10 +155,22 @@ if(isset($_SESSION['success_message'])) {
         <li></li><li></li><li></li><li></li><li></li><li></li>
     </ul>
 
+    <?php if (!empty($successMessage)): ?>
+    <div class="container mt-3" style="position: relative; z-index: 10;">
+        <div class="alert alert-success alert-dismissible fade show border-0 shadow-lg" role="alert" style="border-radius: 15px;">
+            <div class="d-flex align-items-center">
+                <i class="bi bi-check-circle-fill me-3 fs-4 text-success"></i>
+                <div><strong>Berhasil!</strong> <?= $successMessage ?></div>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <div class="container-main">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <div>
-                <h1 class="page-title">Agenda Rapat</h1>
+                <h1 class="page-title"> Daftar Rapat</h1>
                 <p class="text-white-50 m-0">Gunakan kolom cari untuk menemukan data dengan cepat</p>
             </div>
             <?php if($_SESSION['role'] === 'admin'): ?>
@@ -163,15 +194,15 @@ if(isset($_SESSION['success_message'])) {
                 <table class="table mb-0" id="rapatTable">
                     <thead>
                         <tr>
-                            <th style="width: 35%">Nama Agenda</th>
+                            <th style="width: 35%">Nama Agenda Rapat</th>
                             <th>Waktu & Tempat</th>
                             <th>Status</th>
                             <th class="text-center">Aksi</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php if(mysqli_num_rows($q) > 0): ?>
-                            <?php while($row = mysqli_fetch_assoc($q)): ?>
+                        <?php if(!empty($daftarRapat)): ?>
+                            <?php foreach($daftarRapat as $row): ?>
                             <tr>
                                 <td>
                                     <div class="fw-bold text-dark fs-6"><?= htmlspecialchars($row['judul']) ?></div>
@@ -179,7 +210,7 @@ if(isset($_SESSION['success_message'])) {
                                 </td>
                                 <td>
                                     <div class="small fw-bold mb-1"><i class="bi bi-calendar3 me-2 text-primary"></i><?= date('d M Y', strtotime($row['tanggal'])) ?></div>
-                                    <div class="small text-muted"><i class="bi bi-geo-alt-fill me-1 text-danger"></i> <?= $row['tempat'] ?></div>
+                                    <div class="small text-muted"><i class="bi bi-geo-alt-fill me-1 text-danger"></i> <?= htmlspecialchars($row['tempat']) ?></div>
                                 </td>
                                 <td>
                                     <span class="badge-status <?= $row['status'] == 'Selesai' ? 'st-selesai' : 'st-jadwal' ?>">
@@ -203,7 +234,7 @@ if(isset($_SESSION['success_message'])) {
                                     </div>
                                 </td>
                             </tr>
-                            <?php endwhile; ?>
+                            <?php endforeach; ?>
                         <?php else: ?>
                             <tr><td colspan="4" class="text-center py-5">Belum ada data rapat tersedia.</td></tr>
                         <?php endif; ?>
@@ -251,7 +282,7 @@ if(isset($_SESSION['success_message'])) {
         const m = new bootstrap.Modal(document.getElementById('modalDetail'));
         function showDetail(data) {
             document.getElementById('det-judul').innerText = data.judul;
-            document.getElementById('det-peserta').innerHTML = data.peserta || 'Data notulensi belum diisi.';
+            document.getElementById('det-peserta').innerHTML = data.peserta || 'Data peserta belum diisi.';
             m.show();
         }
     </script>

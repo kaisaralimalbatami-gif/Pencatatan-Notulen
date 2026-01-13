@@ -9,67 +9,91 @@ if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'admin') {
     exit;
 }
 
-// 2. PROSES HAPUS (Jika form disubmit via POST)
+// 2. KONEKSI DATABASE
+$conn = getDBConnection();
+
+/**
+ * Fungsi Modular: Ambil Data Notulen untuk Konfirmasi
+ */
+function getNotulenInfo($conn, $id) {
+    try {
+        $sql = "SELECT n.id, n.judul_notulen, r.judul as judul_rapat, r.tanggal 
+                FROM notulen n 
+                LEFT JOIN rapat r ON r.id = n.rapat_id 
+                WHERE n.id = ?";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        return $stmt->get_result()->fetch_assoc();
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+/**
+ * Fungsi Modular: Eksekusi Hapus Notulen
+ */
+function hapusNotulen($conn, $id) {
+    try {
+        $stmt = $conn->prepare("DELETE FROM notulen WHERE id = ?");
+        $stmt->bind_param("i", $id);
+        return $stmt->execute();
+    } catch (Exception $e) {
+        error_log("Error Hapus Notulen: " . $e->getMessage());
+        return false;
+    }
+}
+
+// 3. PROSES HAPUS (Jika form disubmit via POST)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm']) && $_POST['confirm'] == '1') {
     $id = (int)$_POST['id'];
 
-    // Cek data sebelum hapus untuk keperluan Log & Feedback
-    $check = mysqli_query($conn, "
-        SELECT n.judul_notulen, r.judul as judul_rapat 
-        FROM notulen n 
-        LEFT JOIN rapat r ON r.id = n.rapat_id 
-        WHERE n.id = '$id'
-    ");
+    // Ambil data dulu buat log & pesan sukses
+    $data = getNotulenInfo($conn, $id);
 
-    if (mysqli_num_rows($check) > 0) {
-        $data = mysqli_fetch_assoc($check);
+    if ($data) {
         $judul = $data['judul_notulen'];
         
         // Eksekusi Hapus
-        $result = mysqli_query($conn, "DELETE FROM notulen WHERE id = '$id'");
-
-        if ($result) {
-            // --- MULAI KODE CCTV (LOG AKTIVITAS) ---
-            require_once __DIR__ . '/../helpers/log.php';
+        if (hapusNotulen($conn, $id)) {
             
-            // Catat log dengan helper standar kita
-            $log_pesan = "Menghapus notulen: " . $judul;
-            catat_log($conn, $log_pesan);
+            // --- KODE CCTV (LOG AKTIVITAS) ---
+            $logPath = __DIR__ . '/../app/helpers/log.php';
+            if (file_exists($logPath)) {
+                require_once $logPath;
+                if (function_exists('catat_log')) {
+                    catat_log($conn, "Menghapus notulen: " . $judul);
+                }
+            }
             // --- SELESAI KODE CCTV ---
 
-            $_SESSION['success'] = "Notulen <strong>'$judul'</strong> berhasil dihapus!";
+            $_SESSION['success'] = "Notulen <strong>'" . htmlspecialchars($judul) . "'</strong> berhasil dihapus!";
         } else {
-            $_SESSION['error'] = "Gagal menghapus: " . mysqli_error($conn);
+            $_SESSION['error'] = "Terjadi kesalahan sistem saat menghapus data.";
         }
     } else {
-        $_SESSION['error'] = "Data tidak ditemukan!";
+        $_SESSION['error'] = "Data sudah tidak tersedia.";
     }
 
     header("Location: index.php");
     exit;
 }
 
-// 3. TAMPILAN KONFIRMASI (Jika diakses via GET)
+// 4. TAMPILAN KONFIRMASI (Jika diakses via GET)
 if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
     header("Location: index.php");
     exit;
 }
 
 $id = (int)$_GET['id'];
-$query = mysqli_query($conn, "
-    SELECT n.*, r.judul as judul_rapat, r.tanggal 
-    FROM notulen n 
-    LEFT JOIN rapat r ON r.id = n.rapat_id 
-    WHERE n.id = '$id'
-");
+$notulen = getNotulenInfo($conn, $id);
 
-if (mysqli_num_rows($query) == 0) {
+if (!$notulen) {
     $_SESSION['error'] = 'Notulen tidak ditemukan!';
     header("Location: index.php");
     exit;
 }
-
-$notulen = mysqli_fetch_assoc($query);
 ?>
 <!DOCTYPE html>
 <html lang="id">

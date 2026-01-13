@@ -1,54 +1,112 @@
 <?php
+// AWALI DENGAN OUTPUT BUFFERING
+ob_start();
+
 session_start();
 require_once __DIR__ . '/../app/config/database.php';
 
-// Proteksi Halaman
+// 1. PROTEKSI HALAMAN
 if (!isset($_SESSION['login'])) {
     header("Location: ../auth/login.php");
     exit;
 }
 
-// Ambil ID dari URL
-if (!isset($_GET['id'])) {
+// 2. KONEKSI DATABASE
+$conn = getDBConnection();
+
+/**
+ * Fungsi Modular: Ambil Data Rapat Berdasarkan ID
+ */
+function getRapatById($conn, $id) {
+    try {
+        $stmt = $conn->prepare("SELECT * FROM rapat WHERE id = ?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        return $stmt->get_result()->fetch_assoc();
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+/**
+ * Fungsi Modular: Update Data Rapat
+ */
+function updateRapat($conn, $id, $data) {
+    try {
+        $sql = "UPDATE rapat SET 
+                judul = ?, 
+                tanggal = ?, 
+                waktu = ?, 
+                tempat = ?, 
+                peserta = ?, 
+                status = ? 
+                WHERE id = ?";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("ssssssi", 
+            $data['judul'], 
+            $data['tanggal'], 
+            $data['waktu'], 
+            $data['tempat'], 
+            $data['peserta'], 
+            $data['status'], 
+            $id
+        );
+
+        if ($stmt->execute()) {
+            // --- LOG AKTIVITAS ---
+            $logPath = __DIR__ . '/../app/helpers/log.php';
+            if (file_exists($logPath)) {
+                require_once $logPath;
+                if (function_exists('catat_log')) {
+                    catat_log($conn, "Mengedit agenda rapat: " . $data['judul']);
+                }
+            }
+            return true;
+        }
+        return false;
+    } catch (Exception $e) {
+        error_log("Error Update Rapat: " . $e->getMessage());
+        return false;
+    }
+}
+
+// 3. VALIDASI ID
+if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
     header("Location: index.php");
     exit;
 }
 
-$id = mysqli_real_escape_string($conn, $_GET['id']);
-
-// Ambil data rapat lama
-$data = mysqli_query($conn, "SELECT * FROM rapat WHERE id='$id'");
-$rapat = mysqli_fetch_assoc($data);
+$id = (int)$_GET['id'];
+$rapat = getRapatById($conn, $id);
 
 if (!$rapat) {
-    header("Location: index.php?error=Data tidak ditemukan");
+    echo "<script>alert('Data tidak ditemukan!'); window.location='index.php';</script>";
     exit;
 }
 
-// Proses Update
+// 4. PROSES UPDATE
 if (isset($_POST['update'])) {
-    $judul   = mysqli_real_escape_string($conn, $_POST['judul']);
-    $tanggal = mysqli_real_escape_string($conn, $_POST['tanggal']);
-    $waktu   = mysqli_real_escape_string($conn, $_POST['waktu']);
-    $tempat  = mysqli_real_escape_string($conn, $_POST['tempat']);
-    $peserta = mysqli_real_escape_string($conn, $_POST['peserta']);
-    $status  = mysqli_real_escape_string($conn, $_POST['status']);
+    $dataUpdate = [
+        'judul'   => $_POST['judul'],
+        'tanggal' => $_POST['tanggal'],
+        'waktu'   => $_POST['waktu'],
+        'tempat'  => $_POST['tempat'],
+        'peserta' => $_POST['peserta'],
+        'status'  => $_POST['status']
+    ];
 
-    $query = "UPDATE rapat SET 
-                judul = '$judul', 
-                tanggal = '$tanggal', 
-                waktu = '$waktu', 
-                tempat = '$tempat', 
-                peserta = '$peserta', 
-                status = '$status' 
-              WHERE id = '$id'";
-
-    if (mysqli_query($conn, $query)) {
-        $_SESSION['success_message'] = "Rapat '$judul' berhasil diperbarui!";
+    if (updateRapat($conn, $id, $dataUpdate)) {
+        $_SESSION['success_message'] = "Rapat berhasil diperbarui!";
         header("Location: index.php");
         exit;
+    } else {
+        echo "<script>alert('Gagal memperbarui data.');</script>";
     }
 }
+
+require_once __DIR__ . '/../include/navbar.php';
+ob_end_flush();
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -77,7 +135,6 @@ if (isset($_POST['update'])) {
             100% { background-position: 0% 50%; }
         }
 
-        /* Bubbles effect seperti di Login & Tambah */
         .bg-bubbles {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             z-index: 0; overflow: hidden; pointer-events: none;
@@ -100,7 +157,6 @@ if (isset($_POST['update'])) {
             padding: 40px 20px; 
         }
 
-        /* Card Styling - Solid Putih mirip Dashboard */
         .form-card {
             background: #ffffff;
             border-radius: 25px;
@@ -110,7 +166,7 @@ if (isset($_POST['update'])) {
         }
 
         .form-header {
-            background: #1e293b; /* Navy Gelap sesuai Dashboard */
+            background: #1e293b;
             padding: 30px;
             color: white;
             text-align: center;
@@ -121,7 +177,6 @@ if (isset($_POST['update'])) {
 
         .form-body { padding: 40px; }
 
-        /* Label & Input Styling */
         .form-label {
             font-weight: 700;
             color: #1e293b;
@@ -152,7 +207,6 @@ if (isset($_POST['update'])) {
             outline: none;
         }
 
-        /* Pill Action Buttons */
         .btn-pill {
             padding: 12px 30px;
             border-radius: 50px;
@@ -204,8 +258,6 @@ if (isset($_POST['update'])) {
         <li></li><li></li><li></li><li></li><li></li>
     </ul>
 
-    <?php require_once __DIR__ . '/../include/navbar.php'; ?>
-
     <div class="container-main">
         <div class="form-card">
             <div class="form-header">
@@ -254,7 +306,7 @@ if (isset($_POST['update'])) {
                         <label class="form-label"><i class="bi bi-arrow-repeat"></i> Status Rapat</label>
                         <select name="status" class="form-control-custom">
                             <option value="Terjadwal" <?= $rapat['status']=='Terjadwal'?'selected':'' ?>>Terjadwal</option>
-                            <option value="Berlangsung" <?= $rapat['status']=='Berlangsung'?'selected':'' ?>>berlangsung</option>
+                            <option value="Berlangsung" <?= $rapat['status']=='Berlangsung'?'selected':'' ?>>Berlangsung</option>
                             <option value="Selesai" <?= $rapat['status']=='Selesai'?'selected':'' ?>>Selesai</option>
                         </select>
                     </div>

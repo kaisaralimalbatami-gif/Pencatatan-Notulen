@@ -3,30 +3,51 @@ session_start();
 require_once __DIR__ . '/../app/config/database.php';
 require_once __DIR__ . '/../include/navbar.php';
 
-// Validasi ID
+// 1. KONEKSI DATABASE
+$conn = getDBConnection();
+
+/**
+ * Fungsi Modular: Ambil Detail Notulen + Info Rapat
+ */
+function ambilDetailNotulen($conn, $id) {
+    try {
+        $sql = "SELECT n.*, r.judul as judul_rapat, r.tanggal, r.waktu, r.tempat, r.peserta, r.status
+                FROM notulen n 
+                JOIN rapat r ON r.id = n.rapat_id 
+                WHERE n.id = ?";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        return $result->fetch_assoc();
+
+    } catch (Exception $e) {
+        error_log("Error Detail Notulen: " . $e->getMessage());
+        return null;
+    }
+}
+
+// 2. VALIDASI ID
 if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
     $_SESSION['error'] = 'ID notulen tidak valid!';
-    header("Location: index.php");
+    echo "<script>window.location='index.php';</script>";
     exit;
 }
 
 $id = (int)$_GET['id'];
 
-// Ambil data notulen
-$query = mysqli_query($conn, "
-    SELECT n.*, r.judul as judul_rapat, r.tanggal, r.waktu, r.tempat, r.peserta, r.status
-    FROM notulen n 
-    JOIN rapat r ON r.id = n.rapat_id 
-    WHERE n.id = '$id'
-");
+// 3. AMBIL DATA
+$notulen = ambilDetailNotulen($conn, $id);
 
-if (mysqli_num_rows($query) == 0) {
+if (!$notulen) {
     $_SESSION['error'] = 'Notulen tidak ditemukan!';
-    header("Location: index.php");
+    echo "<script>window.location='index.php';</script>";
     exit;
 }
 
-$notulen = mysqli_fetch_assoc($query);
+// Format Tanggal
 $tanggal_rapat = date('d F Y', strtotime($notulen['tanggal']));
 $waktu_rapat = date('H:i', strtotime($notulen['waktu']));
 ?>
@@ -238,7 +259,7 @@ $waktu_rapat = date('H:i', strtotime($notulen['waktu']));
         </div>
     </div>
 
-    <?php if($notulen['tindak_lanjut']): ?>
+    <?php if(!empty($notulen['tindak_lanjut'])): ?>
     <div class="glass-card">
         <div class="section-header">
             <i class="bi bi-arrow-repeat text-warning"></i> Tindak Lanjut & PIC

@@ -1,53 +1,101 @@
 <?php
-// AWALI DENGAN OUTPUT BUFFERING
 ob_start();
 session_start();
 
-// Pastikan path ini benar
+// 1. SETUP & KONEKSI
 require_once __DIR__ . '/../app/config/database.php';
 
-// proteksi login hanya untuk admin
+// Proteksi Admin
 if (!isset($_SESSION['login']) || $_SESSION['role'] != 'admin') {
     header("Location: ../auth/login.php");
     exit;
 }
 
-/* ================== STATISTIK ================== */
+$conn = getDBConnection();
 
-// TOTAL RAPAT
-$qRapatAll = mysqli_query($conn, "SELECT COUNT(*) AS total FROM rapat");
-$totalRapatAll = $qRapatAll ? mysqli_fetch_assoc($qRapatAll)['total'] : 0;
+/**
+ * Fungsi Modular 1: Mengambil semua data statistik
+ * Menggunakan Try-Catch untuk menangani jika ada tabel yang belum dibuat
+ */
+function ambilStatistikDashboard($conn) {
+    $data = [
+        'total_rapat' => 0,
+        'total_user' => 0,
+        'rapat_bulan_ini' => 0,
+        'total_notulen' => 0,
+        'user_aktif' => 0
+    ];
 
-// TOTAL USER
-$qUserAll = mysqli_query($conn, "SELECT COUNT(*) AS total FROM users");
-$totalUserAll = $qUserAll ? mysqli_fetch_assoc($qUserAll)['total'] : 0;
+    try {
+        // A. Total Rapat
+        $res = mysqli_query($conn, "SELECT COUNT(*) as total FROM rapat");
+        if($res) $data['total_rapat'] = mysqli_fetch_assoc($res)['total'];
 
-// TOTAL RAPAT BULAN INI
-$bulan = date('m');
-$tahun = date('Y');
-$qRapat = mysqli_query($conn, "SELECT COUNT(*) AS total FROM rapat WHERE MONTH(tanggal)='$bulan' AND YEAR(tanggal)='$tahun'");
-$totalRapat = $qRapat ? mysqli_fetch_assoc($qRapat)['total'] : 0;
+        // B. Total User
+        $res = mysqli_query($conn, "SELECT COUNT(*) as total FROM users");
+        if($res) $data['total_user'] = mysqli_fetch_assoc($res)['total'];
 
-// TOTAL NOTULEN (Cek dulu tabelnya ada gak)
-$totalNotulen = 0;
-$qCheckNotulen = mysqli_query($conn, "SHOW TABLES LIKE 'notulen'");
-if ($qCheckNotulen && mysqli_num_rows($qCheckNotulen) > 0) {
-    $qNotulen = mysqli_query($conn, "SELECT COUNT(*) AS total FROM notulen");
-    $totalNotulen = $qNotulen ? mysqli_fetch_assoc($qNotulen)['total'] : 0;
+        // C. Rapat Bulan Ini (Prepared Statement simple)
+        $bulan = date('m');
+        $tahun = date('Y');
+        $stmt = $conn->prepare("SELECT COUNT(*) as total FROM rapat WHERE MONTH(tanggal)=? AND YEAR(tanggal)=?");
+        $stmt->bind_param("ss", $bulan, $tahun);
+        $stmt->execute();
+        $res = $stmt->get_result()->fetch_assoc();
+        $data['rapat_bulan_ini'] = $res['total'];
+
+        // D. Total Notulen (Cek tabel dulu biar safe)
+        $cekTabel = mysqli_query($conn, "SHOW TABLES LIKE 'notulen'");
+        if (mysqli_num_rows($cekTabel) > 0) {
+            $res = mysqli_query($conn, "SELECT COUNT(*) as total FROM notulen");
+            if($res) $data['total_notulen'] = mysqli_fetch_assoc($res)['total'];
+        }
+
+        // E. User Aktif Hari Ini (Cek tabel aktivitas)
+        $cekLog = mysqli_query($conn, "SHOW TABLES LIKE 'aktivitas'");
+        if (mysqli_num_rows($cekLog) > 0) {
+            $res = mysqli_query($conn, "SELECT COUNT(DISTINCT user_id) as total FROM aktivitas WHERE DATE(created_at)=CURDATE()");
+            if($res) $data['user_aktif'] = mysqli_fetch_assoc($res)['total'];
+        }
+
+    } catch (Exception $e) {
+        // Jika error, catat di log server, jangan tampilkan ke user
+        error_log("Error Statistik Dashboard: " . $e->getMessage());
+    }
+
+    return $data;
 }
 
-// USER AKTIF HARI INI (Menggunakan tabel 'aktivitas')
-// Kalau tabel belum ada, kita kasih nilai 0 biar ga fatal error
-$userAktif = 0;
-$cekTabelLog = mysqli_query($conn, "SHOW TABLES LIKE 'aktivitas'");
-if(mysqli_num_rows($cekTabelLog) > 0){
-    $qUserAktif = mysqli_query($conn, "SELECT COUNT(DISTINCT user_id) AS total FROM aktivitas WHERE DATE(created_at)=CURDATE()");
-    if($qUserAktif){
-        $userAktif = mysqli_fetch_assoc($qUserAktif)['total'];
+/**
+ * Fungsi Modular 2: Mengambil log aktivitas terbaru
+ */
+function ambilLogAktivitas($conn, $limit = 5) {
+    try {
+        // Cek tabel dulu
+        $cekTabel = mysqli_query($conn, "SHOW TABLES LIKE 'aktivitas'");
+        if (mysqli_num_rows($cekTabel) == 0) {
+            return []; // Kembalikan array kosong jika tabel belum ada
+        }
+
+        $stmt = $conn->prepare("SELECT * FROM aktivitas ORDER BY created_at DESC LIMIT ?");
+        $stmt->bind_param("i", $limit);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        // Fetch all rows
+        return $result->fetch_all(MYSQLI_ASSOC);
+
+    } catch (Exception $e) {
+        error_log("Error Log Aktivitas: " . $e->getMessage());
+        return [];
     }
 }
 
-// SEKARANG INCLUDE NAVBAR
+// EKSEKUSI FUNGSI (Logic Controller)
+$stats = ambilStatistikDashboard($conn);
+$logs  = ambilLogAktivitas($conn);
+
+// Include Navbar
 require_once __DIR__ . '/../include/navbar.php';
 ob_end_flush();
 ?>
@@ -88,7 +136,7 @@ ob_end_flush();
 
         /* Glassmorphism Effect */
         .glass-card {
-            background: rgba(255, 255, 255, 0.95); /* Sedikit lebih solid biar teks jelas */
+            background: rgba(255, 255, 255, 0.95); 
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 20px;
@@ -165,7 +213,7 @@ ob_end_flush();
         }
 
         .activity-content {
-            padding: 0; /* Ubah padding jadi 0 buat tabel */
+            padding: 0; 
         }
 
         .refresh-btn {
@@ -226,28 +274,28 @@ ob_end_flush();
         <div class="col-md-3">
             <div class="glass-card stat-card card-meetings">
                 <div class="stat-icon"><i class="bi bi-calendar-check"></i></div>
-                <div class="stat-number"><?= $totalRapat ?></div>
+                <div class="stat-number"><?= $stats['rapat_bulan_ini'] ?></div>
                 <div class="stat-label">Rapat Bulan Ini</div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="glass-card stat-card card-notulen">
                 <div class="stat-icon" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);"><i class="bi bi-file-earmark-text"></i></div>
-                <div class="stat-number"><?= $totalNotulen ?></div>
+                <div class="stat-number"><?= $stats['total_notulen'] ?></div>
                 <div class="stat-label">Total Notulen</div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="glass-card stat-card card-active">
                 <div class="stat-icon" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);"><i class="bi bi-person-check"></i></div>
-                <div class="stat-number"><?= $userAktif ?></div>
+                <div class="stat-number"><?= $stats['user_aktif'] ?></div>
                 <div class="stat-label">User Aktif Hari Ini</div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="glass-card stat-card card-total">
                 <div class="stat-icon" style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);"><i class="bi bi-people"></i></div>
-                <div class="stat-number"><?= $totalUserAll ?></div>
+                <div class="stat-number"><?= $stats['total_user'] ?></div>
                 <div class="stat-label">Total Pengguna</div>
             </div>
         </div>
@@ -269,36 +317,29 @@ ob_end_flush();
                         </tr>
                     </thead>
                     <tbody>
-                        <?php
-                        // Cek tabel aktivitas ada apa nggak
-                        if(mysqli_num_rows($cekTabelLog) > 0){
-                            $qLog = mysqli_query($conn, "SELECT * FROM aktivitas ORDER BY created_at DESC LIMIT 5");
-                            
-                            if (mysqli_num_rows($qLog) > 0) {
-                                while($row = mysqli_fetch_assoc($qLog)):
-                        ?>
-                        <tr>
-                            <td class="ps-4 text-muted small">
-                                <i class="bi bi-clock me-1"></i>
-                                <?= date('d M Y H:i', strtotime($row['created_at'])); ?>
-                            </td>
-                            <td class="fw-bold text-dark">
-                                <i class="bi bi-person-circle me-1 text-secondary"></i> 
-                                <?= htmlspecialchars($row['nama_user']); ?>
-                            </td>
-                            <td class="pe-4">
-                                <?= htmlspecialchars($row['aksi']); ?>
-                            </td>
-                        </tr>
-                        <?php 
-                                endwhile;
-                            } else {
-                                echo '<tr><td colspan="3" class="text-center py-5 text-muted">Belum ada aktivitas tercatat</td></tr>';
-                            }
-                        } else {
-                            echo '<tr><td colspan="3" class="text-center py-5 text-danger">Tabel "aktivitas" belum dibuat di database!</td></tr>';
-                        }
-                        ?>
+                        <?php if (empty($logs)): ?>
+                            <tr>
+                                <td colspan="3" class="text-center py-5 text-muted">
+                                    Belum ada aktivitas tercatat / Tabel belum dibuat.
+                                </td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($logs as $row): ?>
+                            <tr>
+                                <td class="ps-4 text-muted small">
+                                    <i class="bi bi-clock me-1"></i>
+                                    <?= date('d M Y H:i', strtotime($row['created_at'])); ?>
+                                </td>
+                                <td class="fw-bold text-dark">
+                                    <i class="bi bi-person-circle me-1 text-secondary"></i> 
+                                    <?= htmlspecialchars($row['nama_user']); ?>
+                                </td>
+                                <td class="pe-4">
+                                    <?= htmlspecialchars($row['aksi']); ?>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
                     </tbody>
                 </table>
             </div>

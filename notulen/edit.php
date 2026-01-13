@@ -5,69 +5,107 @@ ob_start();
 session_start();
 require_once __DIR__ . '/../app/config/database.php';
 
-// Proteksi akses (Sesuaikan dengan session di dashboard lu)
+// 1. PROTEKSI HALAMAN
 if (!isset($_SESSION['login'])) {
     header("Location: ../auth/login.php");
     exit;
 }
 
-// Validasi ID
+// 2. KONEKSI DATABASE
+$conn = getDBConnection();
+
+/**
+ * Fungsi Modular: Ambil Data Notulen + Rapat
+ */
+function getNotulenById($conn, $id) {
+    try {
+        $sql = "SELECT n.*, r.judul as judul_rapat, r.tanggal, r.waktu, r.tempat, r.status
+                FROM notulen n 
+                JOIN rapat r ON r.id = n.rapat_id 
+                WHERE n.id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        return $stmt->get_result()->fetch_assoc();
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+/**
+ * Fungsi Modular: Update Notulen
+ */
+function updateNotulen($conn, $id, $data) {
+    try {
+        $sql = "UPDATE notulen SET
+                pembahasan = ?,
+                keputusan = ?,
+                catatan = ?,
+                tindak_lanjut = ?,
+                penanggung_jawab = ?
+                WHERE id = ?";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("sssssi", 
+            $data['pembahasan'], 
+            $data['keputusan'], 
+            $data['catatan'], 
+            $data['tindak_lanjut'], 
+            $data['penanggung_jawab'], 
+            $id
+        );
+        
+        if ($stmt->execute()) {
+            // Log Aktivitas
+            $logPath = __DIR__ . '/../app/helpers/log.php';
+            if (file_exists($logPath)) {
+                require_once $logPath;
+                if (function_exists('catat_log')) {
+                    $pesan = "Mengedit notulen ID: " . $id;
+                    catat_log($conn, $pesan);
+                }
+            }
+            return true;
+        }
+        return false;
+    } catch (Exception $e) {
+        error_log("Error Update Notulen: " . $e->getMessage());
+        return false;
+    }
+}
+
+// 3. VALIDASI ID & DATA
 if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
-    $_SESSION['error'] = 'ID notulen tidak valid!';
     header("Location: index.php");
     exit;
 }
 
 $id = (int)$_GET['id'];
+$n = getNotulenById($conn, $id);
 
-// Ambil data notulen dengan informasi rapat
-$query = mysqli_query($conn, "
-    SELECT n.*, r.judul as judul_rapat, r.tanggal, r.waktu, r.tempat, r.status
-    FROM notulen n 
-    JOIN rapat r ON r.id = n.rapat_id 
-    WHERE n.id='$id'
-");
-
-if (mysqli_num_rows($query) == 0) {
+if (!$n) {
     $_SESSION['error'] = 'Notulen tidak ditemukan!';
     header("Location: index.php");
     exit;
 }
 
-$n = mysqli_fetch_assoc($query);
-
-// Proses update
+// 4. PROSES UPDATE
 if(isset($_POST['update'])){
-    $pembahasan = mysqli_real_escape_string($conn, $_POST['pembahasan']);
-    $keputusan = mysqli_real_escape_string($conn, $_POST['keputusan']);
-    $catatan = mysqli_real_escape_string($conn, $_POST['catatan']);
-    $tindak_lanjut = mysqli_real_escape_string($conn, $_POST['tindak_lanjut']);
-    $penanggung_jawab = mysqli_real_escape_string($conn, $_POST['penanggung_jawab']);
-    
-    $q_update = mysqli_query($conn, "
-        UPDATE notulen SET
-            pembahasan = '$pembahasan',
-            keputusan = '$keputusan',
-            catatan = '$catatan',
-            tindak_lanjut = '$tindak_lanjut',
-            penanggung_jawab = '$penanggung_jawab'
-        WHERE id = '$id'
-    ");
-    
-    // --- MULAI KODE CCTV (LOG AKTIVITAS) ---
-    if ($q_update) {
-        // Panggil Helper Log
-        require_once __DIR__ . '/../helpers/log.php';
-        
-        // Ambil judul rapat dari data $n yang udah di-select di atas
-        $log_pesan = "Mengedit notulen rapat: " . $n['judul_rapat'];
-        catat_log($conn, $log_pesan);
-    }
-    // --- SELESAI KODE CCTV ---
+    $dataUpdate = [
+        'pembahasan'       => $_POST['pembahasan'],
+        'keputusan'        => $_POST['keputusan'],
+        'catatan'          => $_POST['catatan'],
+        'tindak_lanjut'    => $_POST['tindak_lanjut'],
+        'penanggung_jawab' => $_POST['penanggung_jawab']
+    ];
 
-    $_SESSION['success'] = 'Notulen berhasil diperbarui!';
-    header("Location: index.php");
-    exit;
+    if (updateNotulen($conn, $id, $dataUpdate)) {
+        $_SESSION['success'] = 'Notulen berhasil diperbarui!';
+        header("Location: index.php");
+        exit;
+    } else {
+        $error = "Gagal mengupdate data.";
+    }
 }
 
 require_once __DIR__ . '/../include/navbar.php';
@@ -229,7 +267,7 @@ ob_end_flush();
                 <p class="text-muted mb-0">Sesuaikan hasil rapat dengan format profesional.</p>
             </div>
             <span class="status-badge">
-                <i class="bi bi-info-circle me-1"></i> Status Rapat: <?= $n['status'] ?>
+                <i class="bi bi-info-circle me-1"></i> Status Rapat: <?= htmlspecialchars($n['status']) ?>
             </span>
         </div>
     </div>
@@ -255,9 +293,9 @@ ob_end_flush();
             </div>
 
             <div class="mb-4">
-                <label class="form-label-custom"><i class="bi bi-list-stars text-primary"></i> Agenda Rapat</label>
+                <label class="form-label-custom"><i class="bi bi-list-stars text-primary"></i> Agenda Rapat (Read Only)</label>
                 <div class="form-control-custom bg-light" style="white-space: pre-line; border-style: dashed;">
-                    <?= htmlspecialchars($n['agenda']) ?>
+                    <?= htmlspecialchars($n['agenda'] ?? '') ?>
                 </div>
             </div>
 

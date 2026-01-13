@@ -1,33 +1,74 @@
 <?php
+ob_start();
 session_start();
+
 require_once __DIR__ . '/../app/config/database.php';
 require_once __DIR__ . '/../include/navbar.php';
 
-// proteksi login
+// 1. Proteksi Login
 if (!isset($_SESSION['login'])) {
     header("Location: ../auth/login.php");
     exit;
 }
 
-$email = htmlspecialchars($_SESSION['email'] ?? 'User');
-$nama = htmlspecialchars($_SESSION['nama'] ?? 'User');
-$role = $_SESSION['role'] ?? 'user';
+$conn = getDBConnection();
+$emailUser = $_SESSION['email'] ?? '';
+$namaUser  = $_SESSION['nama'] ?? '';
+$role      = $_SESSION['role'] ?? 'user';
 
-// Hitung jumlah rapat yang diikuti user
-$query_rapat_user = mysqli_query($conn, 
-    "SELECT COUNT(*) as total FROM rapat 
-     WHERE peserta LIKE '%$email%' OR 
-           peserta LIKE '%$nama%'");
-$row_rapat = mysqli_fetch_assoc($query_rapat_user);
-$total_rapat_ikuti = $row_rapat['total'];
+/**
+ * Fungsi: Menghitung total rapat yang diikuti user
+ * Menggunakan Prepared Statement untuk LIKE query yang aman
+ */
+function hitungTotalRapatUser($conn, $email, $nama) {
+    try {
+        // Query mencari peserta berdasarkan Email ATAU Nama
+        $sql = "SELECT COUNT(*) as total FROM rapat WHERE peserta LIKE ? OR peserta LIKE ?";
+        $stmt = $conn->prepare($sql);
+        
+        // Tambahkan wildcard % untuk logika LIKE
+        $paramEmail = "%" . $email . "%";
+        $paramNama  = "%" . $nama . "%";
+        
+        $stmt->bind_param("ss", $paramEmail, $paramNama);
+        $stmt->execute();
+        $result = $stmt->get_result()->fetch_assoc();
+        
+        return $result['total'] ?? 0;
 
-// Rapat terbaru
-$query_rapat_terbaru = mysqli_query($conn, 
-    "SELECT * FROM rapat 
-     WHERE peserta LIKE '%$email%' OR 
-           peserta LIKE '%$nama%'
-     ORDER BY tanggal DESC 
-     LIMIT 3");
+    } catch (Exception $e) {
+        error_log("Error Hitung Rapat User: " . $e->getMessage());
+        return 0;
+    }
+}
+
+/**
+ * Fungsi: Mengambil daftar rapat terbaru user
+ */
+function ambilJadwalRapatTerbaru($conn, $email, $nama, $limit = 3) {
+    try {
+        $sql = "SELECT * FROM rapat WHERE peserta LIKE ? OR peserta LIKE ? ORDER BY tanggal DESC LIMIT ?";
+        $stmt = $conn->prepare($sql);
+        
+        $paramEmail = "%" . $email . "%";
+        $paramNama  = "%" . $nama . "%";
+        
+        $stmt->bind_param("ssi", $paramEmail, $paramNama, $limit);
+        $stmt->execute();
+        return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    } catch (Exception $e) {
+        error_log("Error Ambil Rapat User: " . $e->getMessage());
+        return [];
+    }
+}
+
+// 2. Eksekusi Logika (Controller)
+$totalRapatIkuti = hitungTotalRapatUser($conn, $emailUser, $namaUser);
+$listRapatTerbaru = ambilJadwalRapatTerbaru($conn, $emailUser, $namaUser);
+
+// Tutup buffer sebelum output HTML
+ob_end_flush();
 ?>
 
 <!DOCTYPE html>
@@ -211,8 +252,8 @@ $query_rapat_terbaru = mysqli_query($conn,
     <div class="welcome-banner animate-up">
         <div class="row align-items-center">
             <div class="col-md-8">
-                <h1 class="display-5 fw-bold mb-2">Halo, <?= explode(' ', $nama)[0]; ?>! 👋</h1>
-                <p class="lead opacity-75 mb-4">Senang melihatmu kembali. Hari ini ada <?= $total_rapat_ikuti; ?> agenda rapat yang tercatat atas namamu.</p>
+                <h1 class="display-5 fw-bold mb-2">Halo, <?= htmlspecialchars(explode(' ', $namaUser)[0]); ?>! 👋</h1>
+                <p class="lead opacity-75 mb-4">Senang melihatmu kembali. Hari ini ada <?= $totalRapatIkuti; ?> agenda rapat yang tercatat atas namamu.</p>
                 <div class="d-flex gap-2">
                     <span class="badge bg-white text-primary px-3 py-2 rounded-pill shadow-sm">
                         <i class="bi bi-shield-check me-1"></i> User Terverifikasi
@@ -229,7 +270,7 @@ $query_rapat_terbaru = mysqli_query($conn,
         <div class="col-md-4">
             <div class="stat-card shadow-sm">
                 <div class="stat-icon stat-1"><i class="bi bi-calendar-event"></i></div>
-                <h3 class="stat-val"><?= $total_rapat_ikuti; ?></h3>
+                <h3 class="stat-val"><?= $totalRapatIkuti; ?></h3>
                 <p class="stat-label">Total Rapat Diikuti</p>
             </div>
         </div>
@@ -257,24 +298,24 @@ $query_rapat_terbaru = mysqli_query($conn,
                     <a href="../rapat/index.php" class="btn btn-sm btn-outline-primary rounded-pill">Lihat Semua</a>
                 </div>
 
-                <?php if(mysqli_num_rows($query_rapat_terbaru) > 0): ?>
-                    <?php while($rapat = mysqli_fetch_assoc($query_rapat_terbaru)): ?>
+                <?php if (!empty($listRapatTerbaru)): ?>
+                    <?php foreach($listRapatTerbaru as $rapat): ?>
                         <div class="meeting-item d-flex justify-content-between align-items-center">
                             <div>
-                                <h6 class="fw-bold mb-1"><?= $rapat['judul']; ?></h6>
+                                <h6 class="fw-bold mb-1"><?= htmlspecialchars($rapat['judul']); ?></h6>
                                 <div class="text-muted small">
                                     <i class="bi bi-calendar3 me-1"></i> <?= date('d M Y', strtotime($rapat['tanggal'])); ?> 
                                     <span class="mx-2">|</span>
-                                    <i class="bi bi-geo-alt me-1"></i> <?= $rapat['tempat'] ?: 'Online'; ?>
+                                    <i class="bi bi-geo-alt me-1"></i> <?= htmlspecialchars($rapat['tempat'] ?: 'Online'); ?>
                                 </div>
                             </div>
                             <?php 
                                 $s = $rapat['status'];
                                 $cls = ($s == 'Selesai') ? 'bg-success-subtle text-success' : (($s == 'Berlangsung') ? 'bg-warning-subtle text-warning' : 'bg-primary-subtle text-primary');
                             ?>
-                            <span class="status-pill <?= $cls; ?>"><?= $s; ?></span>
+                            <span class="status-pill <?= $cls; ?>"><?= htmlspecialchars($s); ?></span>
                         </div>
-                    <?php endwhile; ?>
+                    <?php endforeach; ?>
                 <?php else: ?>
                     <div class="text-center py-5">
                         <img src="https://illustrations.popsy.co/white/waiting.svg" alt="empty" style="width: 150px; opacity: 0.5;">
